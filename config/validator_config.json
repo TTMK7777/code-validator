@@ -1,0 +1,37 @@
+{
+  "exclude_patterns": [
+    "**/node_modules/**",
+    "**/venv/**",
+    "**/__pycache__/**",
+    "**/.git/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/.next/**",
+    "**/coverage/**"
+  ],
+  "file_extensions": [
+    ".py",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".json",
+    ".yaml",
+    ".yml"
+  ],
+  "security_rules": {
+    "check_credentials": true,
+    "check_cors": true,
+    "check_sql_injection": true,
+    "check_security_headers": true
+  },
+  "quality_rules": {
+    "max_line_length": 120,
+    "check_unused_imports": true,
+    "check_complex_functions": true
+  },
+  "dependency_rules": {
+    "check_python": true,
+    "check_node": true
+  }
+}
+
