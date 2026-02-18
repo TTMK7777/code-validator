@@ -30,3 +30,6 @@ Thumbs.db
 *.key
 *.pem
 
+# Secrets
+secrets.json
+credentials.json
