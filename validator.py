@@ -217,20 +217,36 @@ class SecurityScanner:
         """SQLインジェクションの可能性を検出"""
         issues = []
         
+        sql_kw = r'\b(SELECT|INSERT|UPDATE|DELETE)\b'
         for line_num, line in enumerate(lines, 1):
-            # 文字列連結によるSQL構築
-            if re.search(r'SELECT.*\+.*|INSERT.*\+.*|UPDATE.*\+.*|DELETE.*\+.*', line, re.IGNORECASE):
-                if 'f"' in line or "f'" in line or '%s' in line or '%d' in line:
-                    issues.append(Issue(
-                        severity=Severity.HIGH,
-                        category="security",
-                        file_path=str(file_path),
-                        line_number=line_num,
-                        message="SQLインジェクションの可能性: 文字列連結によるSQL構築",
-                        rule_id="SEC006",
-                        suggestion="ORMまたはパラメータ化クエリを使用してください",
-                        code_snippet=line.strip()[:100]
-                    ))
+            has_sql_kw = bool(re.search(sql_kw, line, re.IGNORECASE))
+            # パターン1: 文字列連結による動的SQL（+ 演算子 + フォーマット）
+            concat_sqli = (
+                has_sql_kw
+                and re.search(r'.+\+.+', line)
+                and ('f"' in line or "f'" in line or '%s' in line or '%d' in line)
+            )
+            # パターン2: f文字列補間による動的SQL（+ 演算子なし。最も一般的な
+            # 現代的パターンで、旧実装は + を必須としていたため全件見逃して
+            # いた）。SQL文字列内に引用符が混在する（例 '{tok}'）ため範囲を
+            # 厳密に取らず、同一行に f文字列・SQLキーワード・{...} 補間が
+            # 揃うことを条件とするヒューリスティック。
+            fstring_sqli = (
+                has_sql_kw
+                and re.search(r'f["\']', line)
+                and re.search(r'\{[^}]+\}', line)
+            )
+            if concat_sqli or fstring_sqli:
+                issues.append(Issue(
+                    severity=Severity.HIGH,
+                    category="security",
+                    file_path=str(file_path),
+                    line_number=line_num,
+                    message="SQLインジェクションの可能性: 動的なSQL構築（文字列連結またはf文字列補間）",
+                    rule_id="SEC006",
+                    suggestion="ORMまたはパラメータ化クエリを使用してください",
+                    code_snippet=line.strip()[:100]
+                ))
         
         return issues
     
@@ -583,27 +599,93 @@ class CodeValidator:
         
         return files
     
+    def _resolve_diff_base(self, project_path: Path) -> Optional[str]:
+        """差分の比較ベースを解決する。
+
+        `git diff HEAD` は CI の checkout 直後では作業ツリーに未コミット変更が
+        無いため常に空になり、セキュリティゲートが 0 ファイルで素通りしていた
+        (CI-BYPASS-001)。PR の実差分を見るには「マージ先からの分岐点」と比較
+        する必要がある。優先順位:
+          1. origin/<default>...HEAD のマージベース (PR の正しい差分)
+          2. HEAD~1 (origin 不在のローカル単発コミット)
+        いずれも解決できなければ None を返し、呼び出し側でフォールバックする。
+        """
+        candidates = []
+        try:
+            head = subprocess.run(
+                ['git', 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'],
+                cwd=project_path, capture_output=True, text=True, timeout=15,
+            )
+            if head.returncode == 0 and head.stdout.strip():
+                candidates.append(head.stdout.strip())  # 例: origin/main
+        except (subprocess.SubprocessError, OSError):
+            pass
+        candidates += ['origin/main', 'origin/master']
+        for ref in candidates:
+            try:
+                mb = subprocess.run(
+                    ['git', 'merge-base', ref, 'HEAD'],
+                    cwd=project_path, capture_output=True, text=True, timeout=15,
+                )
+                if mb.returncode == 0 and mb.stdout.strip():
+                    return mb.stdout.strip()
+            except (subprocess.SubprocessError, OSError):
+                continue
+        try:
+            rev = subprocess.run(
+                ['git', 'rev-parse', '--verify', '--quiet', 'HEAD~1'],
+                cwd=project_path, capture_output=True, text=True, timeout=15,
+            )
+            if rev.returncode == 0 and rev.stdout.strip():
+                return 'HEAD~1'
+        except (subprocess.SubprocessError, OSError):
+            pass
+        return None
+
     def _get_git_diff_files(self, project_path: Path) -> List[Path]:
         """Git差分のファイルを取得"""
         files = []
-        
+        base = self._resolve_diff_base(project_path)
+        # base が解決できた場合は base...HEAD、できなければ最後の砦として
+        # 作業ツリー差分 (HEAD) を見る。0 ファイルで黙って成功しないよう、
+        # base 解決失敗は警告に出す。
+        diff_args = ['git', 'diff', '--name-only',
+                     f'{base}...HEAD' if base else 'HEAD']
+        if base is None:
+            logger.warning(
+                "Git差分ベースを解決できず HEAD 比較にフォールバック "
+                "(CI では 0 ファイルになり得る — fetch-depth: 0 を確認)"
+            )
+
+        project_root = project_path.resolve()
         try:
             result = subprocess.run(
-                ['git', 'diff', '--name-only', 'HEAD'],
+                diff_args,
                 cwd=project_path,
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=30,  # DOS-001: subprocess に timeout を必須化
             )
-            
+
             if result.returncode == 0:
                 for line in result.stdout.strip().split('\n'):
-                    if line:
-                        file_path = project_path / line
-                        if file_path.exists():
-                            files.append(file_path)
+                    if not line:
+                        continue
+                    # PATH-TRAV-001: 正規化しプロジェクト配下のみ許可。
+                    # 悪意あるコミットの ../../etc/passwd 等を排除する。
+                    candidate = (project_path / line).resolve()
+                    if candidate == project_root or project_root in candidate.parents:
+                        if candidate.exists():
+                            files.append(candidate)
+                    else:
+                        logger.warning(
+                            f"プロジェクト外パスをスキップ: {str(line)[:120]!r}"
+                        )
+        except subprocess.TimeoutExpired:
+            logger.warning("Git差分の取得がタイムアウトしました (30s)")
         except Exception as e:
             logger.warning(f"Git差分の取得エラー: {e}")
-        
+
         return files
     
     def _calculate_summary(self, issues: List[Issue]) -> Dict[str, int]:
@@ -719,8 +801,8 @@ def generate_html_report(result: ValidationResult, output_path: Path):
         """
     
     html_content = html_template.format(
-        project_path=result.project_path,
-        timestamp=result.timestamp,
+        project_path=html.escape(str(result.project_path)),
+        timestamp=html.escape(str(result.timestamp)),
         total_files=result.total_files,
         execution_time=result.execution_time,
         critical=result.summary['critical'],
