@@ -96,9 +96,23 @@ class SecurityScanner:
     }
     
     # CORS設定のパターン
+    # 注: FastAPI CORSMiddleware の設定はカンマ・改行・他kwargsを跨いで記述されるため、
+    # allow_origins と allow_credentials が同順序かつ隣接している保証はない。
+    # ここでは「ワイルドカードを含む allow_origins」と「allow_credentials=True」が
+    # 同一ファイル内に共存していることを検出することで実用上のヒット率を確保する。
+    # CORS-REGEX-001 (#13/#14) で修正済み: 旧パターンは閉じ `\]` 欠落により本番コードに永遠に
+    # マッチしなかったため、両側に `\]?` と DOTALL ベースの近接マッチを導入。
     CORS_PATTERNS = {
-        'wildcard_with_credentials': r'allow_origins\s*=\s*\[["\']\*["\']\s*,\s*allow_credentials\s*=\s*True',
-        'wildcard_origins': r'allow_origins\s*=\s*\[["\']\*["\']',
+        # allow_origins=["*"] のリスト（"*" 単体または他要素混在）を許容
+        'wildcard_origins': r'allow_origins\s*=\s*\[[^\]]*["\']\*["\'][^\]]*\]',
+        # 同一ファイル内に wildcard origins と allow_credentials=True が共存
+        'wildcard_with_credentials': (
+            r'allow_origins\s*=\s*\[[^\]]*["\']\*["\'][^\]]*\]'
+            r'[\s\S]{0,500}?allow_credentials\s*=\s*True'
+            r'|'
+            r'allow_credentials\s*=\s*True'
+            r'[\s\S]{0,500}?allow_origins\s*=\s*\[[^\]]*["\']\*["\'][^\]]*\]'
+        ),
     }
     
     def scan_file(self, file_path: Path) -> List[Issue]:
