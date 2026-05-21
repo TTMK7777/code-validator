@@ -13,6 +13,9 @@ ENV/
 reports/
 validation-report.json
 
+# GitHub Pages site (allow docs/ HTML)
+!docs/*.html
+
 # IDE
 .vscode/
 .idea/
