@@ -36,7 +36,7 @@ jobs:
         python validator.py --git-diff --output validation-report.json --format json
 
     - name: Upload validation report
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       if: always()
       with:
         name: validation-report
