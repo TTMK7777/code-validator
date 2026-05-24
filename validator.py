@@ -417,8 +417,47 @@ class DependencyChecker:
                 timeout=60
             )
             
-            if result.returncode != 0:
-                # pip-auditがインストールされていない場合
+            # pip-audit は脆弱性を検出すると returncode=1 を返すため、
+            # returncode で「未インストール / 失敗」を判定してはならない（DEP-LOGIC-002）。
+            # stdout に JSON があれば優先的に解析する。
+            audit_data = None
+            if result.stdout:
+                try:
+                    audit_data = json.loads(result.stdout)
+                except json.JSONDecodeError:
+                    audit_data = None
+
+            if audit_data is not None:
+                # pip-audit の JSON スキーマは
+                #   { "dependencies": [ { "name": ..., "vulns": [...] }, ... ] }
+                # または旧形式 { "vulnerabilities": [...] } のどちらか。
+                vulns = []
+                if isinstance(audit_data, dict):
+                    if 'vulnerabilities' in audit_data:
+                        vulns = audit_data.get('vulnerabilities') or []
+                    elif 'dependencies' in audit_data:
+                        for dep in audit_data.get('dependencies') or []:
+                            for v in dep.get('vulns') or []:
+                                vulns.append({
+                                    'name': dep.get('name', 'unknown'),
+                                    'id': v.get('id', 'unknown'),
+                                    'fix_versions': v.get('fix_versions'),
+                                })
+                for vuln in vulns:
+                    fix = vuln.get('fix_versions') or 'パッケージを更新してください'
+                    if isinstance(fix, list):
+                        fix = ', '.join(fix) if fix else 'パッケージを更新してください'
+                    issues.append(Issue(
+                        severity=Severity.HIGH,
+                        category="dependencies",
+                        file_path=str(requirements_file),
+                        line_number=None,
+                        message=f"脆弱性検出: {vuln.get('name', 'unknown')} - {vuln.get('id', 'unknown')}",
+                        rule_id="DEP002",
+                        suggestion=fix,
+                    ))
+            elif result.returncode != 0:
+                # JSON も無く非ゼロ終了 → pip-audit 未インストール等の実行失敗
                 issues.append(Issue(
                     severity=Severity.INFO,
                     category="dependencies",
@@ -428,23 +467,6 @@ class DependencyChecker:
                     rule_id="DEP001",
                     suggestion="pip install pip-audit を実行してください",
                 ))
-            else:
-                # 脆弱性が見つかった場合
-                try:
-                    audit_data = json.loads(result.stdout)
-                    if audit_data.get('vulnerabilities'):
-                        for vuln in audit_data['vulnerabilities']:
-                            issues.append(Issue(
-                                severity=Severity.HIGH,
-                                category="dependencies",
-                                file_path=str(requirements_file),
-                                line_number=None,
-                                message=f"脆弱性検出: {vuln.get('name', 'unknown')} - {vuln.get('id', 'unknown')}",
-                                rule_id="DEP002",
-                                suggestion=vuln.get('fix_versions', 'パッケージを更新してください'),
-                            ))
-                except json.JSONDecodeError:
-                    pass
                     
         except FileNotFoundError:
             issues.append(Issue(
