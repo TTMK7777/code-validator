@@ -15,7 +15,7 @@ jobs:
       issues: write
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
       with:
         # CI-BYPASS-001: 全履歴がないと merge-base が解決できず
         # --git-diff が 0 ファイルでゲートを素通りする
