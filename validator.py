@@ -585,7 +585,10 @@ class CodeValidator:
             files_to_check = self._get_git_diff_files(project_path)
         else:
             files_to_check = self._get_all_files(project_path)
-        
+
+        self_path = Path(__file__).resolve()
+        files_to_check = [f for f in files_to_check if f.resolve() != self_path]
+
         logger.info(f"検証対象ファイル数: {len(files_to_check)}")
         
         # セキュリティスキャン
