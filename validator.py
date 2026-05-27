@@ -499,11 +499,30 @@ class DependencyChecker:
                 timeout=60
             )
             
-            if result.returncode == 0:
-                try:
-                    audit_data = json.loads(result.stdout)
+            # npm audit は脆弱性検出時に returncode=1 を返す仕様のため、
+            # returncode ではなく stdout の JSON を根拠に脆弱性を判定する (DEP-LOGIC-003)
+            # returncode=0: 脆弱性なし / returncode=1: 脆弱性あり
+            # returncode>=2: ネットワークエラー・npm未インストール等の実行失敗
+            if result.returncode not in (0, 1):
+                logger.warning(
+                    "npm audit が異常終了しました (returncode=%d)。"
+                    "npm のインストール状況やネットワークを確認してください。",
+                    result.returncode,
+                )
+            else:
+                audit_data = None
+                if result.stdout:
+                    try:
+                        audit_data = json.loads(result.stdout)
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            "npm audit の出力が JSON として解析できませんでした。"
+                            "npm のバージョンまたは出力形式を確認してください。"
+                        )
+
+                if audit_data is not None:
                     vulnerabilities = audit_data.get('vulnerabilities', {})
-                    
+
                     for pkg_name, vuln_info in vulnerabilities.items():
                         severity = vuln_info.get('severity', 'unknown')
                         severity_enum = {
@@ -512,7 +531,7 @@ class DependencyChecker:
                             'moderate': Severity.MEDIUM,
                             'low': Severity.LOW,
                         }.get(severity, Severity.MEDIUM)
-                        
+
                         issues.append(Issue(
                             severity=severity_enum,
                             category="dependencies",
@@ -522,8 +541,6 @@ class DependencyChecker:
                             rule_id="DEP003",
                             suggestion="npm audit fix を実行してください",
                         ))
-                except json.JSONDecodeError:
-                    pass
                     
         except FileNotFoundError:
             issues.append(Issue(
