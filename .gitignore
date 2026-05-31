@@ -41,3 +41,8 @@ credentials.json
 .env.local
 *.p12
 .credentials.json
+
+# Internal development notes (not for public repo)
+memory.md
+knowledge.md
+todo.md
