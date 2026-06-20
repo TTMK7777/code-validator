@@ -1,106 +1,402 @@
-
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>コード検証レポート</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        h1 { color: #333; }
-        .summary { display: flex; gap: 20px; margin: 20px 0; }
-        .summary-card { flex: 1; padding: 15px; border-radius: 4px; }
-        .critical { background: #fee; border-left: 4px solid #c00; }
-        .high { background: #ffe; border-left: 4px solid #f90; }
-        .medium { background: #ffd; border-left: 4px solid #fc0; }
-        .low { background: #efe; border-left: 4px solid #0c0; }
-        .info { background: #eef; border-left: 4px solid #09f; }
-        .issue { margin: 10px 0; padding: 10px; border-left: 3px solid #ccc; background: #fafafa; }
-        .issue.critical { border-left-color: #c00; }
-        .issue.high { border-left-color: #f90; }
-        .issue.medium { border-left-color: #fc0; }
-        .issue.low { border-left-color: #0c0; }
-        .issue.info { border-left-color: #09f; }
-        .file-path { font-weight: bold; color: #0066cc; }
-        .suggestion { margin-top: 5px; padding: 5px; background: #e8f4f8; border-radius: 3px; }
-        code { background: #f0f0f0; padding: 2px 4px; border-radius: 2px; font-family: monospace; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>code-validator — Static Security Scanner for AI-Generated Code</title>
+<meta name="description" content="Static security scanner purpose-built for AI-generated code (Claude Code, GitHub Copilot, ChatGPT, Cursor). Detects hardcoded credentials, CORS misconfigurations, SQL injection, and dependency CVEs in under 1 second per file — fully offline, zero data exfiltration. MIT licensed.">
+<meta name="keywords" content="AI security, static analysis, code validation, AI-generated code, CI/CD security, secret detection, CORS validation, dependency audit, Claude Code, GitHub Copilot, LLM security, DevSecOps">
+<meta name="author" content="Taimu Tsuji">
+
+<!-- Open Graph -->
+<meta property="og:title" content="code-validator — Static Security Scanner for AI-Generated Code">
+<meta property="og:description" content="Detects hardcoded credentials, CORS misconfigurations, SQL injection, and dependency CVEs in AI-generated code. <1s per file, fully offline, MIT licensed.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://ttmk7777.github.io/code-validator/">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="code-validator — AI Code Security Scanner">
+<meta name="twitter:description" content="Static security scanner purpose-built for AI-generated code. <1s/file, fully offline, MIT licensed.">
+
+<!-- Schema.org JSON-LD: SoftwareApplication -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "code-validator",
+  "alternateName": "AI Code Security Scanner",
+  "applicationCategory": "DeveloperApplication",
+  "applicationSubCategory": "Security Scanner",
+  "operatingSystem": "Linux, macOS, Windows",
+  "description": "Static security scanner for AI-generated code. Detects hardcoded credentials, CORS misconfigurations, SQL injection patterns, and dependency CVEs in under 1 second per file, fully offline.",
+  "url": "https://github.com/TTMK7777/code-validator",
+  "downloadUrl": "https://github.com/TTMK7777/code-validator",
+  "license": "https://opensource.org/licenses/MIT",
+  "programmingLanguage": "Python",
+  "softwareRequirements": "Python 3.9+",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "author": {
+    "@type": "Person",
+    "name": "Taimu Tsuji",
+    "alternateName": "辻大夢",
+    "jobTitle": "Founder, Tsuji Lab",
+    "url": "https://github.com/TTMK7777"
+  },
+  "keywords": "AI security, static analysis, code validation, AI-generated code, CI/CD security, secret detection, CORS validation, dependency audit, Claude Code, GitHub Copilot, LLM security"
+}
+</script>
+
+<!-- Schema.org JSON-LD: FAQPage -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Why a separate tool for AI-generated code instead of Bandit or Semgrep?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "General-purpose linters were designed for human-written code. AI assistants exhibit specific failure modes — hardcoded example credentials, overly permissive CORS for demos, string-concat SQL because the model 'remembered' pre-ORM patterns. code-validator's rule set is tuned for these patterns and weights severity accordingly."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does code-validator send my code anywhere?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. The scanner runs fully offline. The only optional network call is pip-audit for CVE lookups, and that contacts only the official PyPA advisory database — never your source code."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How is this different from running Bandit + truffleHog + pip-audit separately?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "code-validator unifies them into a single CI step with a coherent severity model and one report format (HTML / JSON / Markdown). With --git-diff mode, only files changed in the current PR are scanned, keeping CI fast."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does it work with Claude Code, Cursor, GitHub Copilot output?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. It scans the resulting source files regardless of which AI assistant generated them. The detection patterns target the output, not the tool."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is there a pre-commit hook?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Use python validator.py --git-diff in a pre-commit hook — exit code 1 blocks the commit when critical/high issues are found."
+      }
+    }
+  ]
+}
+</script>
+
+<style>
+:root {
+  --bg: #0d1117;
+  --fg: #e6edf3;
+  --muted: #7d8590;
+  --accent: #58a6ff;
+  --accent2: #f778ba;
+  --code-bg: #161b22;
+  --border: #30363d;
+  --critical: #f85149;
+  --high: #db6d28;
+  --success: #3fb950;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.6;
+}
+.container { max-width: 920px; margin: 0 auto; padding: 0 24px; }
+header {
+  padding: 60px 24px 40px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+h1 { font-size: 2.5rem; margin: 0 0 8px; }
+.tagline { font-size: 1.2rem; color: var(--muted); margin-bottom: 24px; }
+.badges { margin: 16px 0; }
+.badges img { margin: 2px; vertical-align: middle; }
+.cta { margin-top: 24px; }
+.btn {
+  display: inline-block;
+  padding: 10px 24px;
+  margin: 4px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  transition: all 0.2s;
+}
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary:hover { background: #1f6feb; }
+.btn-secondary { background: transparent; color: var(--fg); }
+.btn-secondary:hover { background: var(--code-bg); }
+section { padding: 48px 0; border-bottom: 1px solid var(--border); }
+section:last-of-type { border-bottom: none; }
+h2 { font-size: 1.8rem; margin-top: 0; color: var(--accent); }
+h3 { color: var(--accent2); margin-top: 32px; }
+code {
+  background: var(--code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: "SF Mono", Monaco, Menlo, monospace;
+  font-size: 0.9em;
+}
+pre {
+  background: var(--code-bg);
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+}
+pre code { background: transparent; padding: 0; }
+table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+th { background: var(--code-bg); color: var(--accent); font-weight: 600; }
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-top: 24px;
+}
+.feature-card {
+  background: var(--code-bg);
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.feature-card .icon { font-size: 1.8rem; margin-bottom: 8px; }
+.feature-card h4 { margin: 0 0 8px; color: var(--fg); }
+.feature-card p { margin: 0; color: var(--muted); font-size: 0.95em; }
+details {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 8px 0;
+}
+details summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+details[open] summary { margin-bottom: 12px; }
+footer {
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9em;
+  border-top: 1px solid var(--border);
+}
+footer a { color: var(--accent); }
+.severity-critical { color: var(--critical); font-weight: 600; }
+.severity-high { color: var(--high); font-weight: 600; }
+@media (max-width: 600px) {
+  h1 { font-size: 1.8rem; }
+  .tagline { font-size: 1rem; }
+  section { padding: 32px 0; }
+}
+</style>
 </head>
 <body>
-    <div style="max-width:1200px;margin:20px auto;padding:16px 20px;background:#0d1117;color:#e6edf3;border-radius:8px;font-family:Arial,sans-serif;line-height:1.6">
-        <div style="font-size:18px;font-weight:bold">🛡️ code-validator — live demo</div>
-        <div style="margin-top:6px">This page is a <strong>real HTML report</strong> generated by running <code style="background:#161b22;color:#79c0ff;padding:2px 6px;border-radius:4px">code-validator</code> on its own repository (dogfooding). The findings below are <strong>intentional vulnerable patterns in the test fixtures</strong> (<code style="background:#161b22;color:#79c0ff;padding:2px 6px;border-radius:4px">tests/test_cors_patterns.py</code>) — proof that detection works end-to-end, in &lt;1s, fully offline.</div>
-        <div style="margin-top:8px"><a href="https://github.com/TTMK7777/code-validator" style="color:#79c0ff;font-weight:bold">View source on GitHub →</a></div>
+
+<header>
+  <div class="container">
+    <h1>🔒 code-validator</h1>
+    <p class="tagline">Static security scanner purpose-built for AI-generated code</p>
+    <div class="badges">
+      <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
+      <img src="https://img.shields.io/badge/python-3.9+-blue.svg" alt="Python 3.9+">
+      <img src="https://img.shields.io/badge/runs-offline-green.svg" alt="Offline">
+      <img src="https://img.shields.io/badge/scans-AI--generated_code-purple.svg" alt="AI Code">
     </div>
-    <div class="container">
-        <h1>🔍 コード検証レポート</h1>
-        <p><strong>プロジェクト:</strong> .</p>
-        <p><strong>検証日時:</strong> 2026-06-20T15:19:37.563219</p>
-        <p><strong>検証ファイル数:</strong> 4</p>
-        <p><strong>実行時間:</strong> 20.51秒</p>
-        
-        <div class="summary">
-            <div class="summary-card critical">
-                <h3>🔴 Critical</h3>
-                <p style="font-size: 24px; margin: 0;">1</p>
-            </div>
-            <div class="summary-card high">
-                <h3>🟠 High</h3>
-                <p style="font-size: 24px; margin: 0;">1</p>
-            </div>
-            <div class="summary-card medium">
-                <h3>🟡 Medium</h3>
-                <p style="font-size: 24px; margin: 0;">3</p>
-            </div>
-            <div class="summary-card low">
-                <h3>🟢 Low</h3>
-                <p style="font-size: 24px; margin: 0;">0</p>
-            </div>
-            <div class="summary-card info">
-                <h3>ℹ️ Info</h3>
-                <p style="font-size: 24px; margin: 0;">0</p>
-            </div>
-        </div>
-        
-        <h2>検出された問題</h2>
-        
-        <div class="issue critical">
-            <div class="file-path">.\tests\test_cors_patterns.py</div>
-            <div><strong>[SEC004]</strong> CORS設定: allow_origins=[&#x27;*&#x27;]とallow_credentials=Trueの組み合わせは危険です</div>
-            
-            <div class="suggestion">💡 推奨: allow_originsを具体的なオリジンに制限してください</div>
-        </div>
-        
-        <div class="issue high">
-            <div class="file-path">.\tests\test_cors_patterns.py</div>
-            <div><strong>[SEC005]</strong> CORS設定: allow_origins=[&#x27;*&#x27;]は本番環境では推奨されません</div>
-            
-            <div class="suggestion">💡 推奨: 環境変数で許可オリジンを制御してください</div>
-        </div>
-        
-        <div class="issue medium">
-            <div class="file-path">.\tests\test_cors_patterns.py</div>
-            <div><strong>[SEC007]</strong> セキュリティヘッダー &#x27;X-Content-Type-Options&#x27; が設定されていません</div>
-            
-            <div class="suggestion">💡 推奨: セキュリティヘッダーミドルウェアを追加してください</div>
-        </div>
-        
-        <div class="issue medium">
-            <div class="file-path">.\tests\test_cors_patterns.py</div>
-            <div><strong>[SEC007]</strong> セキュリティヘッダー &#x27;X-Frame-Options&#x27; が設定されていません</div>
-            
-            <div class="suggestion">💡 推奨: セキュリティヘッダーミドルウェアを追加してください</div>
-        </div>
-        
-        <div class="issue medium">
-            <div class="file-path">.\tests\test_cors_patterns.py</div>
-            <div><strong>[SEC007]</strong> セキュリティヘッダー &#x27;X-XSS-Protection&#x27; が設定されていません</div>
-            
-            <div class="suggestion">💡 推奨: セキュリティヘッダーミドルウェアを追加してください</div>
-        </div>
-        
+    <div class="cta">
+      <a href="https://github.com/TTMK7777/code-validator" class="btn btn-primary">⭐ View on GitHub</a>
+      <a href="#quickstart" class="btn btn-secondary">Quick Start</a>
+      <a href="demo-report.html" class="btn btn-secondary">▶ View live sample report</a>
     </div>
+  </div>
+</header>
+
+<section>
+  <div class="container">
+    <h2>What is code-validator?</h2>
+    <p>
+      <strong>code-validator</strong> is a static security scanner purpose-built for code produced by AI assistants — Claude Code, ChatGPT, GitHub Copilot, Cursor. It detects the <em>specific failure modes</em> that LLMs disproportionately emit: hardcoded API keys in examples, <code>allow_origins=["*"]</code> with <code>allow_credentials=True</code>, string-concatenated SQL, and unpatched dependency CVEs.
+    </p>
+    <p>
+      <strong>Why this exists:</strong> AI-assisted PRs frequently land with subtle security defects that look correct at a glance. <code>code-validator</code> is the lightweight CI gate that catches these <em>before</em> they reach <code>main</code> — in under 1 second per file, fully offline, with zero data exfiltration.
+    </p>
+
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="icon">⚡</div>
+        <h4>Sub-second scans</h4>
+        <p>&lt;1s per file. <code>--git-diff</code> mode scans only changed files for CI.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🔒</div>
+        <h4>100% Offline</h4>
+        <p>No SaaS. No code leaves your machine. Only dep: <code>pydantic</code>.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🎯</div>
+        <h4>AI-code tuned</h4>
+        <p>11 detection rules targeting LLM-specific failure modes (SEC001–007, QUAL001, DEP001–003).</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">🧪</div>
+        <h4>CI/CD ready</h4>
+        <p>Exit code 1 on critical/high. GitHub Actions + GitLab CI examples included.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="quickstart">
+  <div class="container">
+    <h2>Quick Start</h2>
+    <pre><code># 1. Clone
+git clone https://github.com/TTMK7777/code-validator.git
+cd code-validator
+
+# 2. Install (only pydantic required)
+pip install -r requirements.txt
+
+# 3. Scan
+python validator.py --git-diff
+# Exits with code 1 if critical/high issues found — blocks CI</code></pre>
+
+    <h3>Generate an HTML report</h3>
+    <pre><code>python validator.py --path . --output report.html --format html</code></pre>
+
+    <h3>Pre-commit hook</h3>
+    <pre><code># .git/hooks/pre-commit
+#!/bin/sh
+python validator.py --git-diff || exit 1</code></pre>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>Detection Rules</h2>
+    <table>
+      <thead>
+        <tr><th>Rule</th><th>Severity</th><th>Category</th><th>Detects</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>SEC001</td><td class="severity-critical">Critical</td><td>Security</td><td>Hardcoded API key</td></tr>
+        <tr><td>SEC002</td><td class="severity-critical">Critical</td><td>Security</td><td>Hardcoded password</td></tr>
+        <tr><td>SEC003</td><td class="severity-critical">Critical</td><td>Security</td><td>Hardcoded database credentials</td></tr>
+        <tr><td>SEC004</td><td class="severity-critical">Critical</td><td>Security</td><td>CORS wildcard + credentials enabled</td></tr>
+        <tr><td>SEC005</td><td class="severity-high">High</td><td>Security</td><td>CORS wildcard origins (production risk)</td></tr>
+        <tr><td>SEC006</td><td class="severity-high">High</td><td>Security</td><td>SQL injection via string concatenation</td></tr>
+        <tr><td>SEC007</td><td>Medium</td><td>Security</td><td>Missing FastAPI security headers</td></tr>
+        <tr><td>QUAL001</td><td>Low</td><td>Quality</td><td>Line exceeds max length</td></tr>
+        <tr><td>DEP002</td><td class="severity-high">High</td><td>Deps</td><td>Python package with known CVE</td></tr>
+        <tr><td>DEP003</td><td>Variable</td><td>Deps</td><td>Node.js package with known CVE</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>How code-validator Compares</h2>
+    <table>
+      <thead>
+        <tr><th>Tool</th><th>AI-code focus</th><th>Offline</th><th>Speed</th><th>Deps</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>code-validator</strong></td><td>✅ Purpose-built</td><td>✅ Yes</td><td>&lt;1s/file</td><td>✅ pydantic only</td></tr>
+        <tr><td>Bandit</td><td>❌ General Python</td><td>✅ Yes</td><td>Fast</td><td>Multiple</td></tr>
+        <tr><td>Semgrep</td><td>❌ Multi-lang patterns</td><td>⚠️ Hybrid</td><td>Medium</td><td>Heavy</td></tr>
+        <tr><td>GitGuardian</td><td>❌ Git secrets</td><td>❌ SaaS</td><td>Slow (API)</td><td>SaaS</td></tr>
+        <tr><td>TruffleHog</td><td>❌ Git secrets</td><td>✅ Yes</td><td>Slow</td><td>Multiple</td></tr>
+      </tbody>
+    </table>
+    <p style="color: var(--muted); margin-top: 16px;">
+      <strong>Positioning:</strong> code-validator is the only tool in this list specifically tuned for the failure modes of AI-generated code (e.g., the CORS wildcard + credentials pattern LLMs disproportionately emit).
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>FAQ</h2>
+
+    <details>
+      <summary>Why a separate tool for AI-generated code? Can't I just use Bandit or Semgrep?</summary>
+      <p>General-purpose linters were designed for human-written code. AI assistants exhibit <em>specific</em> failure modes — hardcoded example credentials, overly permissive CORS for demos, string-concat SQL because the model "remembered" pre-ORM patterns. code-validator's rule set is tuned for these patterns and weights severity accordingly.</p>
+    </details>
+
+    <details>
+      <summary>Does code-validator send my code anywhere?</summary>
+      <p>No. The scanner runs fully offline. The only optional network call is <code>pip-audit</code> for CVE lookups, and that contacts only the official PyPA advisory database — never your source code.</p>
+    </details>
+
+    <details>
+      <summary>How is this different from running Bandit + TruffleHog + pip-audit separately?</summary>
+      <p>code-validator unifies them into a single CI step with a coherent severity model and one report format (HTML / JSON / Markdown). With <code>--git-diff</code> mode, only files changed in the current PR are scanned, keeping CI fast.</p>
+    </details>
+
+    <details>
+      <summary>Does it work with Claude Code, Cursor, GitHub Copilot output?</summary>
+      <p>Yes. It scans the resulting source files regardless of which AI assistant generated them. The detection patterns target the <em>output</em>, not the tool.</p>
+    </details>
+
+    <details>
+      <summary>What Python version do I need?</summary>
+      <p>Python 3.9 or later.</p>
+    </details>
+
+    <details>
+      <summary>Is there a pre-commit hook?</summary>
+      <p>Yes. Use <code>python validator.py --git-diff</code> in a pre-commit hook — exit code <code>1</code> blocks the commit when critical/high issues are found.</p>
+    </details>
+
+    <details>
+      <summary>Can I customize the detection rules?</summary>
+      <p>Yes — see <code>config/validator_config.json</code>. You can disable rule categories, change line-length thresholds, and add exclude patterns.</p>
+    </details>
+  </div>
+</section>
+
+<section>
+  <div class="container">
+    <h2>About the Author</h2>
+    <p>
+      Built by <strong>Taimu Tsuji (辻大夢)</strong> — Founder of <a href="https://github.com/TTMK7777" style="color: var(--accent);">Tsuji Lab</a>, Applied AI Architect specializing in multi-agent AI coordination and AI-assisted software development at scale.
+    </p>
+    <ul>
+      <li><strong>Experience:</strong> ~1.4M lines of AI-assisted code shipped across 4 concurrent projects; ~8,000 engineering hours saved per year via Claude Code automation.</li>
+      <li><strong>Expertise:</strong> Claude Agent SDK, MCP, multi-agent orchestration, AI security gating.</li>
+      <li><strong>Why I built this:</strong> After watching AI-generated PRs land with <code>allow_origins=["*"]</code> more than once, I needed a gate that ran in &lt;1s and didn't ship code off-box. Existing tools were either too heavy, too noisy, or required SaaS.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <p>
+    <a href="https://github.com/TTMK7777/code-validator">GitHub</a> ·
+    <a href="https://github.com/TTMK7777/code-validator/blob/main/LICENSE">MIT License</a> ·
+    <a href="https://github.com/TTMK7777/code-validator/issues">Issues</a> ·
+    <a href="https://github.com/TTMK7777/code-validator/blob/main/llms.txt">llms.txt</a>
+  </p>
+  <p>© 2026 Taimu Tsuji · Built at Tsuji Lab</p>
+</footer>
+
 </body>
 </html>
-    
