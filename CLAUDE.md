@@ -6,19 +6,21 @@
 2. `specs/NNN-機能名.md` に個別仕様を記述
 3. `plan.md` のフェーズに紐付け
 4. `todo.md` でタスク管理
-5. `src/` に実装、`tests/` でテスト
+5. ルート直下の `validator.py` に実装、`tests/` でテスト
 6. `knowledge.md` に知見、`memory.md` に教訓を蓄積
 
 ## プロジェクト構造
 | ファイル | 役割 |
 |---------|------|
+| validator.py | 実装本体（単一ファイル） |
 | spec.md | 仕様概要・機能一覧・非機能要件・用語定義 |
 | plan.md | 計画・ロードマップ・フェーズ管理・決定事項ログ |
 | todo.md | タスク管理（進行中/未着手/完了/保留） |
 | knowledge.md | 技術判断・知見・外部リソース・FAQ |
 | memory.md | 失敗と教訓・不採用記録・フィードバック |
 | specs/ | 個別仕様書 |
+| tests/ | テストコード |
 
 ## コード規約
 - Python: PEP 8, pytest, 型ヒント推奨
-- 依存関係: pydantic >= 2.0.0（最小依存）
+- 依存関係: pydantic == 2.13.4（最小依存）

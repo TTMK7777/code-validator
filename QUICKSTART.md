@@ -3,7 +3,8 @@
 ## インストール
 
 ```bash
-cd 01_AI-Agents/code-validator
+git clone https://github.com/TTMK7777/code-validator.git
+cd code-validator
 pip install -r requirements.txt
 ```
 

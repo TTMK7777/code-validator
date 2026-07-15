@@ -2,7 +2,8 @@
 
 AI 生成コード向けの静的セキュリティスキャナー **code-validator** のドキュメント一覧です。
 読者のロール別に入口を用意しています。各ドキュメントは [Diátaxis](https://diataxis.fr/) の
-4 分類（Tutorial / How-to / Reference / Explanation）で整理しています。
+4 分類（Tutorial / How-to / Reference / Explanation）を下表の「種別」列で示す簡易版で運用しており、
+`tutorials/` `how-to/` 等の物理ディレクトリは設けず、既存ファイル構成のまま表でマッピングしています。
 
 > このページは `docs/` 配下に置かれています。リンクはこのファイルからの相対パスです。
 
