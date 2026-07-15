@@ -11,9 +11,9 @@ code-validator is a Python 3.9+ command-line tool that acts as a CI/CD quality g
 - License: MIT
 - Author: Taimu Tsuji (辻大夢), Founder of Tsuji Lab
 - Repository: https://github.com/TTMK7777/code-validator
-- Core dependency: pydantic >= 2.0.0 (only)
+- Core dependency: pydantic == 2.13.4 (only)
 - Optional: pip-audit (Python CVE checks), npm audit (Node CVE checks)
-- Output formats: HTML, JSON, Markdown
+- Output formats: HTML, JSON
 - CI integration: GitHub Actions, GitLab CI examples included
 - Exit code 1 on critical/high severity, suitable for blocking merges
 - `--git-diff` mode scans only files changed since HEAD (CI-optimized)

@@ -51,7 +51,7 @@
 | Component | Detail |
 |-----------|--------|
 | Language | Python 3.9+ |
-| Core dependency | `pydantic >= 2.0.0` |
+| Core dependency | `pydantic == 2.13.4` |
 | Optional | `pip-audit >= 2.6.0` (Python dep auditing) |
 | CI | GitHub Actions |
 
@@ -119,13 +119,13 @@ python validator.py --path . --config config/validator_config.json
 
 ```
 usage: validator.py [-h] [--path PATH] [--git-diff] [--output OUTPUT]
-                    [--format {html,json,markdown}] [--config CONFIG]
+                    [--format {html,json}] [--config CONFIG]
 
 optional arguments:
   --path PATH      Project path to scan (default: current directory)
   --git-diff       Scan only files changed since HEAD
   --output OUTPUT  Output file path for the report
-  --format         Report format: html | json | markdown (default: html)
+  --format         Report format: html | json (default: html)
   --config CONFIG  Path to a custom JSON configuration file
 ```
 
@@ -292,7 +292,7 @@ General-purpose linters were designed for human-written code. AI assistants exhi
 No. The scanner runs fully offline. The only optional network call is `pip-audit` for CVE lookups, and that contacts only the official PyPA advisory database — never your source code.
 
 ### Q: How is this different from running Bandit + `truffleHog` + `pip-audit` separately?
-code-validator unifies them into a single CI step with a coherent severity model and one report format (HTML / JSON / Markdown). For `--git-diff` mode, only files changed in the current PR are scanned, keeping CI fast.
+code-validator unifies them into a single CI step with a coherent severity model and one report format (HTML / JSON). For `--git-diff` mode, only files changed in the current PR are scanned, keeping CI fast.
 
 ### Q: Can I customize the detection rules?
 Yes — see `config/validator_config.json`. You can disable rule categories, change line-length thresholds, and add exclude patterns.
