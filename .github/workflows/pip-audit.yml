@@ -1,0 +1,19 @@
+# pip-audit 脆弱性ゲート（共通 reusable workflow を呼び出すだけの薄いファイル）
+# 仕様・ignore 運用: claude-code-agents/docs/supply-chain-runbook.md
+name: pip-audit
+on:
+  pull_request:
+    paths:
+      - "**/requirements*.txt"
+      - "**/pyproject.toml"
+      - ".github/workflows/pip-audit.yml"
+  schedule:
+    - cron: "0 21 * * 0" # 月曜 6:00 JST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    uses: TTMK7777/claude-code-agents/.github/workflows/pip-audit-reusable.yml@main
