@@ -20,7 +20,7 @@ AI生成コードのセキュリティ脆弱性・コード品質・依存関係
 
 ## 技術スタック
 - 言語: Python 3.9+
-- 依存: pydantic >= 2.0.0
+- 依存: pydantic == 2.13.4
 - オプション: pip-audit >= 2.6.0
 - CI: GitHub Actions
 
