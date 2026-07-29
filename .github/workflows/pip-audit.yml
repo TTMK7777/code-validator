@@ -1,4 +1,11 @@
-# pip-audit 脆弱性ゲート（共通 reusable workflow を呼び出すだけの薄いファイル）
+# pip-audit 脆弱性ゲート（自己完結版）
+#
+# 【なぜ reusable workflow を使わないか】
+# 共通版は private リポ TTMK7777/claude-code-agents にあり、public リポの caller からは
+# 解決できない（run が 0 秒で failure し、ゲートとして機能しない）。
+# 本リポは public なので、共通版と同一内容をここに展開している。
+# 共通版 (.github/workflows/pip-audit-reusable.yml) の更新時は手動同期が必要。
+#
 # 仕様・ignore 運用: claude-code-agents/docs/supply-chain-runbook.md
 name: pip-audit
 on:
@@ -15,5 +22,161 @@ permissions:
   contents: read
 
 jobs:
-  audit:
-    uses: TTMK7777/claude-code-agents/.github/workflows/pip-audit-reusable.yml@main
+  pip-audit:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pip-audit
+        run: python -m pip install --quiet pip-audit
+      - name: Audit dependency files
+        run: |
+          python - <<'AUDIT_EOF'
+          import datetime
+          import glob
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          import urllib.request
+
+          EXCLUDE_DIRS = re.compile(r"(^|/)(\.venv|venv|node_modules|archive|\.git)(/|$)")
+          PIN_RE = re.compile(r"^([A-Za-z0-9_.\-]+)(\[[^\]]*\])?==([0-9][^ ]*)$")
+
+          def load_ignores():
+              """.pip-audit-ignore: '<ID> # reason until=YYYY-MM-DD' 形式。期限切れは無効。"""
+              ignores = {}
+              if not os.path.exists(".pip-audit-ignore"):
+                  return ignores
+              today = datetime.date.today()
+              for raw in open(".pip-audit-ignore", encoding="utf-8"):
+                  line = raw.strip()
+                  if not line or line.startswith("#"):
+                      continue
+                  vuln_id = line.split()[0]
+                  m = re.search(r"until=(\d{4}-\d{2}-\d{2})", line)
+                  if not m:
+                      print(f"::warning::ignore エントリ {vuln_id} に until= 期限がないため無視します")
+                      continue
+                  until = datetime.date.fromisoformat(m.group(1))
+                  if until < today:
+                      print(f"::warning::ignore エントリ {vuln_id} は {until} で期限切れ（再有効化）")
+                      continue
+                  ignores[vuln_id] = until
+              return ignores
+
+          def parse_requirements(path):
+              pinned, unpinned = [], []
+              for raw in open(path, encoding="utf-8-sig"):
+                  line = raw.split("#")[0].split(";")[0].strip()
+                  if not line or line.startswith(("-r", "--")):
+                      continue
+                  m = PIN_RE.match(line)
+                  (pinned if m else unpinned).append(
+                      (m.group(1), m.group(3)) if m else line
+                  )
+              return pinned, unpinned
+
+          def run_pip_audit(args):
+              proc = subprocess.run(
+                  ["pip-audit", "-f", "json", "--progress-spinner", "off", *args],
+                  capture_output=True, text=True, timeout=900,
+              )
+              try:
+                  data = json.loads(proc.stdout)
+              except (json.JSONDecodeError, ValueError):
+                  return None, proc.stderr.strip()[-2000:]
+              vulns = []
+              for dep in data.get("dependencies", []):
+                  for v in dep.get("vulns", []):
+                      vulns.append({
+                          "package": dep["name"], "version": dep.get("version", "?"),
+                          "id": v["id"], "aliases": v.get("aliases", []),
+                          "fix": v.get("fix_versions", []),
+                      })
+              return vulns, None
+
+          def osv_query(pinned):
+              """pip-audit が解決不能な場合のフォールバック: 固定 pin を OSV に直接照会。"""
+              if not pinned:
+                  return []
+              queries = [{"package": {"name": n, "ecosystem": "PyPI"}, "version": v}
+                         for n, v in pinned]
+              req = urllib.request.Request(
+                  "https://api.osv.dev/v1/querybatch",
+                  data=json.dumps({"queries": queries}).encode(),
+                  headers={"Content-Type": "application/json"},
+              )
+              res = json.loads(urllib.request.urlopen(req, timeout=120).read())
+              vulns = []
+              for (n, v), r in zip(pinned, res["results"]):
+                  for x in r.get("vulns", []):
+                      vulns.append({"package": n, "version": v, "id": x["id"],
+                                    "aliases": [], "fix": ["see advisory"]})
+              return vulns
+
+          ignores = load_ignores()
+          req_files = sorted(
+              f for f in glob.glob("**/requirements*.txt", recursive=True)
+              if not EXCLUDE_DIRS.search(f.replace(os.sep, "/"))
+          )
+          pyprojects = sorted(
+              f for f in glob.glob("**/pyproject.toml", recursive=True)
+              if not EXCLUDE_DIRS.search(f.replace(os.sep, "/"))
+              and not any(os.path.dirname(f) == os.path.dirname(r) for r in req_files)
+          )
+          if not req_files and not pyprojects:
+              print("依存ファイルなし — 監査対象なしで成功終了")
+              sys.exit(0)
+
+          findings, warnings = [], []
+          for f in req_files:
+              pinned, unpinned = parse_requirements(f)
+              if not pinned and not unpinned:
+                  print(f"[SKIP] {f}: 依存宣言なし")
+                  continue
+              args = (["--no-deps", "-r", f] if not unpinned else ["-r", f])
+              vulns, err = run_pip_audit(args)
+              if vulns is None:
+                  warnings.append(f"{f}: pip-audit 解決不能 → OSV 直接照会にフォールバック ({err[:200]})")
+                  vulns = osv_query(pinned)
+                  if unpinned:
+                      warnings.append(f"{f}: 未固定 {len(unpinned)} 行は未監査: {unpinned}")
+              for v in vulns:
+                  v["file"] = f
+              findings.extend(vulns)
+              print(f"[DONE] {f}: {len(vulns)} 件")
+
+          for f in pyprojects:
+              vulns, err = run_pip_audit([os.path.dirname(f) or "."])
+              if vulns is None:
+                  warnings.append(f"{f}: pip-audit 非対応/解決不能のためスキップ ({err[:200]})")
+                  continue
+              for v in vulns:
+                  v["file"] = f
+              findings.extend(vulns)
+              print(f"[DONE] {f}: {len(vulns)} 件")
+
+          active = []
+          for v in findings:
+              ids = {v["id"], *v["aliases"]}
+              hit = ids & set(ignores)
+              if hit:
+                  print(f"[IGNORED] {v['package']}=={v['version']} {v['id']} (until={ignores[next(iter(hit))]})")
+              else:
+                  active.append(v)
+
+          for w in warnings:
+              print(f"::warning::{w}")
+          if active:
+              print(f"\n::error::脆弱性 {len(active)} 件検出:")
+              for v in active:
+                  print(f"  {v['file']} :: {v['package']}=={v['version']} :: {v['id']} → fix {v['fix']}")
+              sys.exit(1)
+          print("\n脆弱性 0 件 — 監査クリア")
+          AUDIT_EOF
