@@ -195,18 +195,55 @@ class SecurityScanner:
         'your-secret-key', 'your_secret_key', 'replace-me',
     }
 
-    # 危険な動的コード実行。ast.literal_eval は安全なので除外する。
+    # 危険な動的コード実行。
+    #
+    # 直前が `.` / 英数字 / 引用符のものは除外する。実コーパスでの計測では、
+    # 除外しないと以下が大量に誤検知になった:
+    #   model.eval()                  PyTorch の推論モード切替
+    #   /re/.exec(str)                JavaScript の正規表現マッチ
+    #   child_process.exec(...)       -> コマンド実行なので SEC011 側で扱う
+    #   "eval("                       スキャナのパターン定義そのものの文字列
     DANGEROUS_EXEC_PATTERNS = [
-        r'(?<!literal_)\beval\s*\(',
-        r'\bexec\s*\(',
+        r'(?<![.\w"\'])eval\s*\(',
+        r'(?<![.\w"\'])exec\s*\(',
     ]
 
-    # コマンドインジェクション。外部入力の連結・補間を伴う shell 実行を狙う。
-    COMMAND_EXEC_PATTERNS = [
+    # コマンドインジェクション: `shell=True` は「意図的に危険側を選んだ」印であり
+    # 引数がリテラルかどうかに関係なく報告する（誤検知が少なく信号が強い）。
+    COMMAND_EXEC_ALWAYS_PATTERNS = [
+        r'subprocess\.(?:run|call|check_call|check_output|Popen)\s*\([^)]*shell\s*=\s*True',
+        r'shell\s*:\s*true',  # Node の child_process オプション
+    ]
+
+    # 一方 os.system / os.popen は `os.system("clear")` のような定数実行が多く、
+    # それ自体は注入経路ではない。動的構築（連結・補間）を伴う場合のみ報告する。
+    COMMAND_EXEC_DYNAMIC_PATTERNS = [
         r'os\.system\s*\(',
         r'os\.popen\s*\(',
-        r'subprocess\.(?:run|call|check_call|check_output|Popen)\s*\([^)]*shell\s*=\s*True',
+        r'child_process[\'"\]\)]*\s*\.\s*exec(?:Sync)?\s*\(',
+        r'\bexecSync\s*\(',
     ]
+
+    # 文字列が動的に組み立てられている印。
+    DYNAMIC_STRING_MARKER = re.compile(r'f["\']|\+|\.\s*format\s*\(|%\s*[\(\w\'"]|\$\{')
+
+    # SQL として実行される文脈。DB API / ORM の実行系メソッドを対象にする。
+    # `.update(` や `.insert(` は Streamlit や tkinter にも存在するため含めない。
+    SQL_EXEC_CONTEXT = re.compile(
+        r'\b(?:execute|executemany|executescript|exec_driver_sql|executescript)\s*\('
+        r'|\bcursor\b'
+        r'|\braw_sql\b|\btext\s*\(\s*f?["\']'
+        r'|\.\s*raw\s*\(',
+        re.IGNORECASE,
+    )
+
+    # 文字列リテラルが SQL 文そのもので始まっているか。
+    # 接頭辞 (f/r/b/u) と三重引用符、先頭の改行・空白を許容する。
+    SQL_STRING_START = re.compile(
+        r'[rbuf]{0,2}["\']{1,3}\s*'
+        r'\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|WITH|MERGE|REPLACE\s+INTO|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE)\b',
+        re.IGNORECASE,
+    )
 
     # 危険な逆シリアライズ。
     UNSAFE_DESERIALIZE_PATTERNS = [
@@ -441,6 +478,16 @@ class SecurityScanner:
         
         sql_kw = r'\b(SELECT|INSERT|UPDATE|DELETE)\b'
         for line_num, line in enumerate(lines, 1):
+            # SQL キーワードは英単語としてもごく普通に出てくる。実コーパスでの
+            # 計測では、キーワードの出現だけを条件にすると以下が大量に誤検知になった:
+            #   logger.warning(f"Failed to delete memory {id}")
+            #   status.update(label=f"完了 {n}件")
+            #   text.insert(tk.END, f"[{ts}] {msg}")
+            #   print(f"Build {v} -> UPDATE DETECTED")
+            # そこで「SQL として実行される文脈」か「文字列が SQL 文で始まる」ことを
+            # 必須条件に加える。
+            if not (self.SQL_EXEC_CONTEXT.search(line) or self.SQL_STRING_START.search(line)):
+                continue
             # コメントアウトされた SQL は実行されないため対象外。
             # ここで _is_comment_or_docstring を使うと、三重引用符を含む行
             # （複数行 SQL の一般的な書き方）まで除外され取りこぼすため、
@@ -494,31 +541,42 @@ class SecurityScanner:
         
         return issues
     
+    # FastAPI アプリの生成箇所。`FastAPI` という語の出現ではなく、
+    # インスタンス化していることを条件にする。
+    #
+    # 旧実装は `'FastAPI' in content` で判定していたため、実コーパスでは
+    # バッジ文字列に "FastAPI" を含むだけの README 生成スクリプトや、
+    # 型注釈のためだけに import しているモジュールで大量に誤検知した。
+    FASTAPI_APP_RE = re.compile(r'\bFastAPI\s*\(')
+
+    # セキュリティヘッダーはアプリ全体で一度ミドルウェアに設定するもの。
+    # X-XSS-Protection は現在非推奨（設定しないことが推奨）なので要求しない。
+    REQUIRED_SECURITY_HEADERS = ('X-Content-Type-Options', 'X-Frame-Options')
+
     def _scan_security_headers(self, file_path: Path, lines: List[str]) -> List[Issue]:
         """セキュリティヘッダーの検出"""
         issues = []
         file_content = '\n'.join(lines)
-        
-        # FastAPIアプリケーションの場合
-        if 'FastAPI' in file_content or 'from fastapi import' in file_content:
-            required_headers = [
-                'X-Content-Type-Options',
-                'X-Frame-Options',
-                'X-XSS-Protection',
-            ]
-            
-            for header in required_headers:
-                if header not in file_content:
-                    issues.append(Issue(
-                        severity=Severity.MEDIUM,
-                        category="security",
-                        file_path=str(file_path),
-                        line_number=None,
-                        message=f"セキュリティヘッダー '{header}' が設定されていません",
-                        rule_id="SEC007",
-                        suggestion="セキュリティヘッダーミドルウェアを追加してください",
-                    ))
-        
+
+        if not self.FASTAPI_APP_RE.search(file_content):
+            return issues
+
+        missing = [h for h in self.REQUIRED_SECURITY_HEADERS if h not in file_content]
+        if not missing:
+            return issues
+
+        # ヘッダーごとに 1 件ずつ出すとルーター分割したアプリで件数が膨らむため、
+        # アプリ 1 つにつき 1 件にまとめる。
+        issues.append(Issue(
+            severity=Severity.MEDIUM,
+            category="security",
+            file_path=str(file_path),
+            line_number=None,
+            message=f"セキュリティヘッダーが設定されていません: {', '.join(missing)}",
+            rule_id="SEC007",
+            suggestion="アプリ生成箇所でセキュリティヘッダーミドルウェアを追加してください",
+        ))
+
         return issues
     
     def _scan_dangerous_calls(self, file_path: Path, lines: List[str]) -> List[Issue]:
@@ -533,10 +591,10 @@ class SecurityScanner:
 
         checks = (
             (
-                self.COMMAND_EXEC_PATTERNS,
+                self.COMMAND_EXEC_ALWAYS_PATTERNS,
                 "SEC011",
-                "外部入力がシェルに渡る可能性があります（コマンドインジェクション）",
-                "subprocess を shell=False で使い、引数はリストで渡してください",
+                "shell=True でのコマンド実行は外部入力の混入経路になります",
+                "shell=False にし、コマンドと引数はリストで渡してください",
             ),
             (
                 self.UNSAFE_DESERIALIZE_PATTERNS,
@@ -555,6 +613,24 @@ class SecurityScanner:
         for line_num, line in enumerate(lines, 1):
             if self._is_commented_out(line):
                 continue
+
+            # os.system 等は動的構築を伴う場合のみ。定数実行（`os.system("clear")`）は
+            # 注入経路ではないため、実コーパスでは誤検知しか生まなかった。
+            if self.DYNAMIC_STRING_MARKER.search(line):
+                for pattern in self.COMMAND_EXEC_DYNAMIC_PATTERNS:
+                    if re.search(pattern, line):
+                        issues.append(Issue(
+                            severity=Severity.HIGH,
+                            category="security",
+                            file_path=str(file_path),
+                            line_number=line_num,
+                            message="動的に組み立てた文字列をシェルに渡しています（コマンドインジェクション）",
+                            rule_id="SEC011",
+                            suggestion="subprocess を shell=False で使い、引数はリストで渡してください",
+                            code_snippet=line.strip()[:100]
+                        ))
+                        break
+
             for patterns, rule_id, message, suggestion in checks:
                 for pattern in patterns:
                     if re.search(pattern, line):

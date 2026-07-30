@@ -34,8 +34,8 @@ FAKE_KEY = "sk-" + "A" * 48
             'app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True)',
             "SEC004",
         ),
-        ("check_sql_injection", 'q = f"SELECT * FROM t WHERE x = {y}"', "SEC006"),
-        ("check_security_headers", 'from fastapi import FastAPI', "SEC007"),
+        ("check_sql_injection", 'cur.execute(f"SELECT * FROM t WHERE x = {y}")', "SEC006"),
+        ("check_security_headers", 'app = FastAPI()', "SEC007"),
         ("check_dangerous_calls", 'v = eval(expr)', "SEC013"),
     ],
 )
