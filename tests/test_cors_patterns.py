@@ -3,7 +3,11 @@
 修正前は `CORS_PATTERNS['wildcard_with_credentials']` のリスト閉じ括弧 `\\]` が欠落しており、
 実際の FastAPI CORSMiddleware 設定 (`allow_origins=["*"]`) には永遠にマッチしなかった。
 このテストはその欠陥が再発しないよう、典型的な FastAPI コードパターンに対する検出を保証する。
+
+このファイルは意図的に脆弱な FastAPI 断片を含むため、スキャナ自身の対象から外す
+（`--git-diff` でこのファイルが差分に入ると SEC004/005/007 が発火し CI が落ちる）。
 """
+# code-validator: ignore-file
 from __future__ import annotations
 
 import re

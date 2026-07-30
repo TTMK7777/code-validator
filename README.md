@@ -14,7 +14,7 @@
 | 🎯 **Use case** | Block insecure AI-generated code at PR time |
 | ⚡ **Speed** | <1s per file, `--git-diff` mode scans only changed files |
 | 🔒 **Privacy** | 100% offline. No code leaves your machine. Only dependency: `pydantic` |
-| 🧪 **Detection rules** | 11 rules across security, quality, and dependency layers (SEC001–SEC007, QUAL001, DEP001–DEP003) |
+| 🧪 **Detection rules** | 21 rules across security, quality, and dependency layers (SEC001–SEC013, QUAL001–QUAL002, DEP001–DEP006) |
 | 📦 **Install** | `pip install -r requirements.txt` — done |
 
 ---
@@ -22,19 +22,35 @@
 ## Features
 
 ### Security Scanning
-- Hardcoded credentials: API keys (OpenAI, Anthropic, Google, GitHub tokens), passwords, database URLs, and secret keys
-- Dangerous CORS configurations: wildcard origins combined with `allow_credentials=True`
-- SQL injection patterns: string-concatenated query construction
+- Hardcoded credentials: API keys (OpenAI, Anthropic, Google, GitHub tokens), passwords, database URLs, Django/Flask `SECRET_KEY`, AWS access keys, and embedded PEM private keys
+- Dangerous CORS configurations: wildcard origins, and wildcard origins combined with `allow_credentials=True`
+- SQL injection patterns: f-string interpolation, `+` concatenation, `str.format()`, and `%` operator
 - Missing security headers: `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection` (FastAPI apps)
+- Command injection: `os.system` / `os.popen` / `subprocess(..., shell=True)`
+- Unsafe deserialization: `pickle` / `marshal` / `shelve` / `yaml.load` without a safe loader
+- Dynamic code execution: `eval` / `exec` (`ast.literal_eval` is excluded)
 
 ### Code Quality Checks
-- Lines exceeding the configured maximum length (default: 120 characters)
-- Unused import detection (heuristic-based; full analysis via flake8)
-- Function complexity stub (extensible for cyclomatic complexity tools)
+- Lines exceeding the configured maximum length (default: 120 characters, set via `quality_rules.max_line_length`)
+- Unused import detection via Python's `ast`, gated by a textual usage check to avoid false positives. `__init__.py`, `from __future__ import`, wildcard imports, and `# noqa` lines are exempt
+- Function complexity: **not implemented** (stub reserved for a cyclomatic complexity tool)
 
 ### Dependency Auditing
 - Python: delegates to `pip-audit` when available
 - Node.js: delegates to `npm audit` when available
+- **Fails loudly when the audit cannot run.** A resolution error, timeout, or crash is reported as `HIGH` (DEP005 / DEP006) rather than silently passing, so "0 findings" never means "nothing was inspected"
+
+### Suppression
+Intentionally vulnerable code (test fixtures, documented exceptions) can be exempted inline:
+
+```python
+API_KEY = "sk-..."                       # code-validator: ignore
+API_KEY = "sk-..."                       # code-validator: ignore[SEC001]
+# code-validator: ignore-file[SEC004]    # whole file, selected rules
+# code-validator: ignore-file            # whole file, all rules
+```
+
+File-level markers exist because some rules (CORS, security headers) are reported against the file rather than a single line.
 
 ### Reporting
 - **HTML**: human-readable browser report with color-coded severity cards
@@ -150,7 +166,8 @@ Edit `config/validator_config.json` to customize behavior:
     "check_credentials": true,
     "check_cors": true,
     "check_sql_injection": true,
-    "check_security_headers": true
+    "check_security_headers": true,
+    "check_dangerous_calls": true
   },
   "quality_rules": {
     "max_line_length": 120,
@@ -163,6 +180,24 @@ Edit `config/validator_config.json` to customize behavior:
   }
 }
 ```
+
+| Key | Effect |
+|-----|--------|
+| `exclude_patterns` | Glob patterns excluded from scanning (matched against both the project-relative and absolute path) |
+| `file_extensions` | Extensions collected when scanning a directory |
+| `security_rules.check_credentials` | SEC001–SEC003, SEC008–SEC010 |
+| `security_rules.check_cors` | SEC004–SEC005 |
+| `security_rules.check_sql_injection` | SEC006 |
+| `security_rules.check_security_headers` | SEC007 |
+| `security_rules.check_dangerous_calls` | SEC011–SEC013 |
+| `quality_rules.max_line_length` | QUAL001 threshold |
+| `quality_rules.check_unused_imports` | QUAL002 |
+| `quality_rules.check_complex_functions` | Reserved; the check is a stub and emits nothing |
+| `dependency_rules.check_python` | `pip-audit` delegation (DEP001, DEP002, DEP005) |
+| `dependency_rules.check_node` | `npm audit` delegation (DEP003, DEP004, DEP006) |
+
+A config file is only applied when passed explicitly via `--config`. Without it, the
+defaults above are used.
 
 ---
 
@@ -234,17 +269,31 @@ code-validation:
 
 | Rule ID | Severity | Category | Description |
 |---------|----------|----------|-------------|
-| SEC001 | Critical | Security | Hardcoded API key detected |
+| SEC001 | Critical | Security | Hardcoded API key detected (OpenAI / Anthropic / Google / GitHub) |
 | SEC002 | Critical | Security | Hardcoded password detected |
 | SEC003 | Critical | Security | Hardcoded database credentials detected |
 | SEC004 | Critical | Security | CORS wildcard origins + credentials enabled |
 | SEC005 | High | Security | CORS wildcard origins (production risk) |
-| SEC006 | High | Security | Potential SQL injection via string concatenation |
+| SEC006 | High | Security | Potential SQL injection via f-string, `+`, `.format()`, or `%` |
 | SEC007 | Medium | Security | Missing security header in FastAPI app |
+| SEC008 | Critical | Security | Hardcoded `SECRET_KEY` (Django / Flask session signing) |
+| SEC009 | Critical | Security | Hardcoded AWS access key or secret access key |
+| SEC010 | Critical | Security | PEM private key embedded in source |
+| SEC011 | High | Security | Command injection via shell execution |
+| SEC012 | High | Security | Unsafe deserialization (`pickle` / `marshal` / `yaml.load`) |
+| SEC013 | High | Security | Dynamic code execution (`eval` / `exec`) |
 | QUAL001 | Low | Quality | Line exceeds maximum length |
-| DEP001 | Info | Dependencies | pip-audit not installed |
+| QUAL002 | Low | Quality | Unused import |
+| DEP001 | Info | Dependencies | `pip-audit` not installed |
 | DEP002 | High | Dependencies | Python package with known CVE |
 | DEP003 | Variable | Dependencies | Node.js package with known CVE |
+| DEP004 | Info | Dependencies | `npm` not installed |
+| DEP005 | **High** | Dependencies | **`pip-audit` could not run** — dependency audit did not happen |
+| DEP006 | **High** | Dependencies | **`npm audit` could not run** — dependency audit did not happen |
+
+> **On DEP005 / DEP006:** these are deliberately `HIGH`, which fails CI. An audit that
+> could not execute is not the same as an audit that found nothing — treating it as
+> `INFO` (the previous behavior) let unresolvable dependency trees pass as green.
 
 ---
 
@@ -279,7 +328,12 @@ Issues by severity:
 | GitGuardian | Secrets in git history | Slow (API) | ❌ No | ❌ No | ❌ SaaS |
 | TruffleHog | Secrets in git history | Slow | ✅ Yes | ❌ No | ❌ Multiple deps |
 
-**Positioning:** code-validator is the *only* tool in this list specifically tuned for the failure modes of AI-generated code (e.g., the `CORS wildcard + allow_credentials=True` pattern that LLMs disproportionately emit).
+**Positioning:** code-validator is the *only* tool in this list specifically tuned for the failure modes of AI-generated code (e.g., the `CORS wildcard + allow_credentials=True` pattern that LLMs disproportionately emit, or `eval` on model-produced strings).
+
+**Scope honesty:** this is a line-oriented pattern scanner, not a dataflow analyzer. It
+does not perform taint tracking, so it flags *shapes* known to be risky rather than
+proving a path from untrusted input to a sink. For deep dataflow analysis, pair it with
+Semgrep or CodeQL — the point of this tool is a sub-second gate, not a replacement.
 
 ---
 
@@ -295,7 +349,13 @@ No. The scanner runs fully offline. The only optional network call is `pip-audit
 code-validator unifies them into a single CI step with a coherent severity model and one report format (HTML / JSON). For `--git-diff` mode, only files changed in the current PR are scanned, keeping CI fast.
 
 ### Q: Can I customize the detection rules?
-Yes — see `config/validator_config.json`. You can disable rule categories, change line-length thresholds, and add exclude patterns.
+Yes — see `config/validator_config.json`, and pass it with `--config`. You can disable rule categories, change the line-length threshold, and add exclude patterns. Every key in that file is honored; see the table in [Configuration](#configuration).
+
+### Q: How do I exempt intentionally vulnerable code?
+Use an inline `# code-validator: ignore` comment — see [Suppression](#suppression). This is how this repository's own test fixtures pass the gate.
+
+### Q: What happens if `pip-audit` fails to run?
+You get a `HIGH` finding (DEP005), which fails CI. This is deliberate: an audit that could not execute must not be reported as green.
 
 ### Q: Does it work with Claude Code, Cursor, GitHub Copilot output?
 Yes. It scans the resulting source files regardless of which AI assistant generated them. The detection patterns target the *output*, not the tool.

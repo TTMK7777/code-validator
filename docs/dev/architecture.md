@@ -30,9 +30,10 @@ code-validator は **単一ファイルのモノリシック CLI** です。す�
 | `Severity` | Enum | `class Severity` | 重大度 5 段階（critical / high / medium / low / info） |
 | `Issue` | dataclass | `class Issue` | 検出結果 1 件（severity / category / file_path / line_number / rule_id / message ほか） |
 | `ValidationResult` | dataclass | `class ValidationResult` | 1 回のスキャン結果全体（issues リスト + サマリー + 実行時間） |
-| `SecurityScanner` | クラス | `class SecurityScanner` | SEC001–SEC007。認証情報 / CORS / SQLi / セキュリティヘッダーを検出 |
-| `CodeQualityChecker` | クラス | `class CodeQualityChecker` | QUAL001。行長・未使用 import・関数複雑度（スタブ） |
-| `DependencyChecker` | クラス | `class DependencyChecker` | DEP001–DEP003。`pip-audit` / `npm audit` へ委譲 |
+| `SecurityScanner` | クラス | `class SecurityScanner` | SEC001–SEC013。認証情報 / CORS / SQLi / セキュリティヘッダー / 危険な API 呼び出しを検出 |
+| `CodeQualityChecker` | クラス | `class CodeQualityChecker` | QUAL001–QUAL002。行長・未使用 import（関数複雑度はスタブで無検出） |
+| `DependencyChecker` | クラス | `class DependencyChecker` | DEP001–DEP006。`pip-audit` / `npm audit` へ委譲し、実行失敗を HIGH で報告 |
+| `_apply_suppressions` | 関数 | `def _apply_suppressions` | `# code-validator: ignore` 系コメントに一致する Issue を除外 |
 | `CodeValidator` | クラス | `class CodeValidator` | オーケストレータ。設定読込・ファイル収集・各スキャナ実行・集計 |
 | `generate_html_report` | 関数 | `def generate_html_report` | HTML レポート（色分けされた重大度カード）を生成 |
 | `main` | 関数 | `def main` | argparse による CLI エントリポイント。JSON 出力と Console サマリーを担当 |
@@ -108,10 +109,20 @@ flowchart TD
 ## 既知の制約と拡張ポイント (Limitations & Extension Points)
 
 - `--format markdown` は CLI で受理されますが、`main` の出力分岐は HTML / JSON のみ実装済みで、Markdown は未実装です（`plan.md` Phase 2）。
-- 関数複雑度チェック（`_check_complex_functions`）はスタブで、サイクロマティック複雑度は未実装です。
-- 未使用 import 検出はヒューリスティックです（厳密解析は flake8 等を併用）。
-- テストは `tests/test_cors_patterns.py` のみ。ルール追加時はここを起点にテストを拡充してください。
+- 関数複雑度チェック（`_check_complex_functions`）はスタブで、何も検出しません。README / spec 側にも「未実装」と明記しています。
+- 未使用 import 検出（QUAL002）は `ast` による束縛解析 + テキスト出現チェックの 2 段構成です。
+  誤検知ゼロを優先する設計のため、取りこぼし（false negative）は許容します。
+- **行単位のパターンマッチであり、データフロー解析（テイント追跡）は行いません。**
+  「危険な形」を指摘するもので、未信頼入力からシンクへの到達性は証明しません。
+  厳密な解析が必要な場合は Semgrep / CodeQL を併用してください。
+- 各ルールにはテストがあります（`tests/` 配下）。ルールを追加したら、
+  **発火する例と発火しない例の両方**を必ず追加してください。片方だけではトートロジーになります。
 
 新しい検出ルールを追加する場合は、対応するスキャナクラス（`SecurityScanner` /
 `CodeQualityChecker` / `DependencyChecker`）にメソッドを追加し、新しい `rule_id` を
 付与した `Issue` を返すのが基本パターンです。仕様は `spec.md` と `specs/` に追記してください。
+
+**配線漏れに注意**: 過去に「パターンは定義したが呼び出していない」欠陥が 2 件
+（`secret_key` の未参照 / `_check_unused_imports` の空実装）ありました。いずれも
+README には機能として書かれていたため、常に 0 件を返す状態が長く残りました。
+テストは内部関数ではなく公開経路（`scan_file` / `check_file`）を通して書いてください。
