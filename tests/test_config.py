@@ -35,7 +35,6 @@ FAKE_KEY = "sk-" + "A" * 48
             "SEC004",
         ),
         ("check_sql_injection", 'cur.execute(f"SELECT * FROM t WHERE x = {y}")', "SEC006"),
-        ("check_security_headers", 'app = FastAPI()', "SEC007"),
         ("check_dangerous_calls", 'v = eval(expr)', "SEC013"),
     ],
 )

@@ -14,7 +14,7 @@
 | 🎯 **Use case** | Block insecure AI-generated code at PR time |
 | ⚡ **Speed** | <1s per file, `--git-diff` mode scans only changed files |
 | 🔒 **Privacy** | 100% offline. No code leaves your machine. Only dependency: `pydantic` |
-| 🧪 **Detection rules** | 21 rules across security, quality, and dependency layers (SEC001–SEC013, QUAL001–QUAL002, DEP001–DEP006) |
+| 🧪 **Detection rules** | 20 rules across security, quality, and dependency layers (SEC001–SEC013 excluding SEC007, QUAL001–QUAL002, DEP001–DEP006) |
 | 📦 **Install** | `pip install -r requirements.txt` — done |
 
 ---
@@ -25,7 +25,6 @@
 - Hardcoded credentials: API keys (OpenAI, Anthropic, Google, GitHub tokens), passwords, database URLs, Django/Flask `SECRET_KEY`, AWS access keys, and embedded PEM private keys
 - Dangerous CORS configurations: wildcard origins, and wildcard origins combined with `allow_credentials=True`
 - SQL injection patterns: f-string interpolation, `+` concatenation, `str.format()`, and `%` operator
-- Missing security headers: `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection` (FastAPI apps)
 - Command injection: `os.system` / `os.popen` / `subprocess(..., shell=True)`
 - Unsafe deserialization: `pickle` / `marshal` / `shelve` / `yaml.load` without a safe loader
 - Dynamic code execution: `eval` / `exec` (`ast.literal_eval` is excluded)
@@ -50,7 +49,7 @@ API_KEY = "sk-..."                       # code-validator: ignore[SEC001]
 # code-validator: ignore-file            # whole file, all rules
 ```
 
-File-level markers exist because some rules (CORS, security headers) are reported against the file rather than a single line.
+File-level markers exist because some rules (CORS) are reported against the file rather than a single line.
 
 ### Reporting
 - **HTML**: human-readable browser report with color-coded severity cards
@@ -166,7 +165,6 @@ Edit `config/validator_config.json` to customize behavior:
     "check_credentials": true,
     "check_cors": true,
     "check_sql_injection": true,
-    "check_security_headers": true,
     "check_dangerous_calls": true
   },
   "quality_rules": {
@@ -188,7 +186,6 @@ Edit `config/validator_config.json` to customize behavior:
 | `security_rules.check_credentials` | SEC001–SEC003, SEC008–SEC010 |
 | `security_rules.check_cors` | SEC004–SEC005 |
 | `security_rules.check_sql_injection` | SEC006 |
-| `security_rules.check_security_headers` | SEC007 |
 | `security_rules.check_dangerous_calls` | SEC011–SEC013 |
 | `quality_rules.max_line_length` | QUAL001 threshold |
 | `quality_rules.check_unused_imports` | QUAL002 |
@@ -275,7 +272,6 @@ code-validation:
 | SEC004 | Critical | Security | CORS wildcard origins + credentials enabled |
 | SEC005 | High | Security | CORS wildcard origins (production risk) |
 | SEC006 | High | Security | Potential SQL injection via f-string, `+`, `.format()`, or `%` |
-| SEC007 | Medium | Security | Missing security header in FastAPI app |
 | SEC008 | Critical | Security | Hardcoded `SECRET_KEY` (Django / Flask session signing) |
 | SEC009 | Critical | Security | Hardcoded AWS access key or secret access key |
 | SEC010 | Critical | Security | PEM private key embedded in source |

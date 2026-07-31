@@ -23,7 +23,6 @@ code-validator is a Python 3.9+ command-line tool that acts as a CI/CD quality g
 - SEC001–SEC003: Hardcoded credentials (API keys, passwords, DB URLs)
 - SEC004–SEC005: CORS wildcard + credentials misconfigurations
 - SEC006: SQL injection via f-string, concatenation, .format(), or % operator
-- SEC007: Missing security headers in FastAPI apps
 - SEC008–SEC010: Hardcoded SECRET_KEY, AWS keys, embedded PEM private keys
 - SEC011–SEC013: Command injection, unsafe deserialization, eval/exec
 - QUAL001–QUAL002: Line length violations, unused imports

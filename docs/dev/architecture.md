@@ -30,7 +30,7 @@ code-validator は **単一ファイルのモノリシック CLI** です。す�
 | `Severity` | Enum | `class Severity` | 重大度 5 段階（critical / high / medium / low / info） |
 | `Issue` | dataclass | `class Issue` | 検出結果 1 件（severity / category / file_path / line_number / rule_id / message ほか） |
 | `ValidationResult` | dataclass | `class ValidationResult` | 1 回のスキャン結果全体（issues リスト + サマリー + 実行時間） |
-| `SecurityScanner` | クラス | `class SecurityScanner` | SEC001–SEC013。認証情報 / CORS / SQLi / セキュリティヘッダー / 危険な API 呼び出しを検出 |
+| `SecurityScanner` | クラス | `class SecurityScanner` | SEC001–SEC013 (SEC007 は削除済み)。認証情報 / CORS / SQLi / 危険な API 呼び出しを検出 |
 | `CodeQualityChecker` | クラス | `class CodeQualityChecker` | QUAL001–QUAL002。行長・未使用 import（関数複雑度はスタブで無検出） |
 | `DependencyChecker` | クラス | `class DependencyChecker` | DEP001–DEP006。`pip-audit` / `npm audit` へ委譲し、実行失敗を HIGH で報告 |
 | `_apply_suppressions` | 関数 | `def _apply_suppressions` | `# code-validator: ignore` 系コメントに一致する Issue を除外 |

@@ -22,7 +22,6 @@
     "check_credentials": true,
     "check_cors": true,
     "check_sql_injection": true,
-    "check_security_headers": true,
     "check_dangerous_calls": true
   },
   "quality_rules": {

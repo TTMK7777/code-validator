@@ -284,7 +284,8 @@ class SecurityScanner:
         self.check_credentials = rules.get('check_credentials', True)
         self.check_cors = rules.get('check_cors', True)
         self.check_sql_injection = rules.get('check_sql_injection', True)
-        self.check_security_headers = rules.get('check_security_headers', True)
+        # check_security_headers は SEC007 の削除にともない廃止。
+        # 既存の設定ファイルに残っていても無視するだけで、エラーにはしない。
         self.check_dangerous_calls = rules.get('check_dangerous_calls', True)
 
     def scan_file(self, file_path: Path) -> List[Issue]:
@@ -307,10 +308,6 @@ class SecurityScanner:
             # SQLインジェクションの可能性
             if self.check_sql_injection:
                 issues.extend(self._scan_sql_injection(file_path, lines))
-
-            # セキュリティヘッダーの検出
-            if self.check_security_headers:
-                issues.extend(self._scan_security_headers(file_path, lines))
 
             # 危険な動的実行・逆シリアライズ・シェル実行
             if self.check_dangerous_calls:
@@ -541,44 +538,19 @@ class SecurityScanner:
         
         return issues
     
-    # FastAPI アプリの生成箇所。`FastAPI` という語の出現ではなく、
-    # インスタンス化していることを条件にする。
+    # SEC007（FastAPI のセキュリティヘッダー欠落）は削除した。
     #
-    # 旧実装は `'FastAPI' in content` で判定していたため、実コーパスでは
-    # バッジ文字列に "FastAPI" を含むだけの README 生成スクリプトや、
-    # 型注釈のためだけに import しているモジュールで大量に誤検知した。
-    FASTAPI_APP_RE = re.compile(r'\bFastAPI\s*\(')
+    # 理由: 行単位・ファイル単位のスキャナでは原理的に判定できない。
+    # セキュリティヘッダーは専用のミドルウェアモジュールに置き、アプリ生成箇所で
+    # add_middleware する構成が標準であり、ヘッダー名は定義側のファイルにしか
+    # 現れない。実コーパスでの計測では、正しくミドルウェアを実装しているアプリを
+    # 「未設定」と誤って指摘した（ORICON-Chart-Dashboard/web/app.py。実際は
+    # web/middleware.py の SecurityHeadersMiddleware で設定済み）。
+    #
+    # 誤検知を絞り込む方向では解決できず、必要なのはモジュール横断の解析。
+    # それはこのツールの設計範囲外なので、ルールごと削除する。
+    # 同種の検査が必要な場合は Semgrep / CodeQL を使うこと。
 
-    # セキュリティヘッダーはアプリ全体で一度ミドルウェアに設定するもの。
-    # X-XSS-Protection は現在非推奨（設定しないことが推奨）なので要求しない。
-    REQUIRED_SECURITY_HEADERS = ('X-Content-Type-Options', 'X-Frame-Options')
-
-    def _scan_security_headers(self, file_path: Path, lines: List[str]) -> List[Issue]:
-        """セキュリティヘッダーの検出"""
-        issues = []
-        file_content = '\n'.join(lines)
-
-        if not self.FASTAPI_APP_RE.search(file_content):
-            return issues
-
-        missing = [h for h in self.REQUIRED_SECURITY_HEADERS if h not in file_content]
-        if not missing:
-            return issues
-
-        # ヘッダーごとに 1 件ずつ出すとルーター分割したアプリで件数が膨らむため、
-        # アプリ 1 つにつき 1 件にまとめる。
-        issues.append(Issue(
-            severity=Severity.MEDIUM,
-            category="security",
-            file_path=str(file_path),
-            line_number=None,
-            message=f"セキュリティヘッダーが設定されていません: {', '.join(missing)}",
-            rule_id="SEC007",
-            suggestion="アプリ生成箇所でセキュリティヘッダーミドルウェアを追加してください",
-        ))
-
-        return issues
-    
     def _scan_dangerous_calls(self, file_path: Path, lines: List[str]) -> List[Issue]:
         """危険な API 呼び出しを検出する。
 

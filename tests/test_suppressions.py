@@ -56,7 +56,7 @@ def test_file_ignore_suppresses_everything(scan) -> None:
 def test_file_ignore_with_rule_ids_suppresses_only_those(scan) -> None:
     """ファイル単位でもルールを絞れること（line_number を持たないルール向け）."""
     code = (
-        '# code-validator: ignore-file[SEC004,SEC005,SEC007]\n'
+        '# code-validator: ignore-file[SEC004,SEC005]\n'
         'from fastapi import FastAPI\n'
         'from fastapi.middleware.cors import CORSMiddleware\n'
         'app = FastAPI()\n'
@@ -64,7 +64,7 @@ def test_file_ignore_with_rule_ids_suppresses_only_those(scan) -> None:
         f'K = "{FAKE_KEY}"\n'
     )
     issues = scan(code)
-    for suppressed in ("SEC004", "SEC005", "SEC007"):
+    for suppressed in ("SEC004", "SEC005"):
         assert_silent(issues, suppressed)
     # 指定外のルールは生きている
     assert_fires(issues, "SEC001")
