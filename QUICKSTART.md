@@ -63,7 +63,6 @@ python validator.py --path . --config config/custom_rules.json
 - パスワードのハードコード
 - CORS設定の不備
 - SQLインジェクションの可能性
-- セキュリティヘッダーの不足
 
 ### コード品質問題
 - 長すぎる行
