@@ -33,6 +33,7 @@ AI 生成コード向けの静的セキュリティスキャナー **code-valida
 | ドキュメント | 種別 (Diátaxis) | 対象読者 | 概要 |
 |---|---|---|---|
 | [README](../README.md) | Reference / Explanation | 全員 | プロジェクト概要・機能・CLI・検出ルール一覧・FAQ |
+| [MAINTAINING.md](../MAINTAINING.md) | How-to | 開発者 | 保守ガイド（地図・逆引き・確認手順・トラブル表・用語集） |
 | [QUICKSTART.md](../QUICKSTART.md) | Tutorial | 利用者 | インストールと基本的な使用例、トラブルシューティング |
 | [アーキテクチャ](dev/architecture.md) | Explanation | 開発者 | コンポーネント構成・データフロー・技術選定理由 |
 | [spec.md](../spec.md) | Reference | 開発者 | 機能一覧・非機能要件・用語定義 |

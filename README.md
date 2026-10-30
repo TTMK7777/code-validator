@@ -17,6 +17,17 @@
 | 🧪 **Detection rules** | 20 rules across security, quality, and dependency layers (SEC001–SEC013 excluding SEC007, QUAL001–QUAL002, DEP001–DEP006) |
 | 📦 **Install** | `pip install -r requirements.txt` — done |
 
+**Maintainers:** see [MAINTAINING.md](MAINTAINING.md) (日本語の保守ガイド: file map, where to change what, how to verify).
+
+### Repository map
+
+| Folder | Contents |
+|---|---|
+| [`tests/`](tests/) | pytest suite (each rule has firing and non-firing examples) |
+| [`docs/`](docs/) | Documentation index, architecture notes, GitHub Pages landing page |
+| [`specs/`](specs/) | Place for per-feature specs (currently only a naming guide) |
+| [`src/`](src/) | Empty placeholder; the implementation is the single file `validator.py` |
+
 ---
 
 ## Features
