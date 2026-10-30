@@ -3,9 +3,9 @@
 このリポジトリ（code-validator）を、AI を使わずに保守するための案内です。
 code-validator は、ソースコードを読んで「危険な書き方」（直書きのパスワード、CORS の全許可など）を探す Python 製の検査ツールです。本体は `validator.py` の 1 ファイルです。
 
-## 2 種類のファイル
+## ファイルの種類
 
-このリポジトリには「普通のコード」と「AI への指示書」があります。どちらもテキストエディタで直せます。
+このリポジトリには「普通のコード」「AI への指示書」「設定」「人間向け文書」があります。どれもテキストエディタで直せます。
 
 | 種類 | 例 | 何か | 直すときの注意 |
 |---|---|---|---|
@@ -19,7 +19,7 @@ code-validator は、ソースコードを読んで「危険な書き方」（�
 | 場所 | 中身 | 種類 |
 |---|---|---|
 | `validator.py` | 実装本体（検出ルール、設定読込、レポート生成、CLI がすべて入っている） | コード |
-| `tests/` | テスト（pytest）。ルールごとに「発火する例」と「発火しない例」がある | コード |
+| `tests/` | テスト（pytest）。発火する例と発火しない例の両方が揃っていないルールもある（例: SEC005 に専用テストは無く、DEP004 は発火側のみ） | コード |
 | `src/` | `__init__.py` だけの空き地。実装は入っていない | コード（空） |
 | `config/` | `--config` で渡す設定の見本 | 設定 |
 | `.github/workflows/` | CI の定義（テスト・自己検査・CodeQL・pip-audit・依存更新の自動マージ） | 設定 |
@@ -45,10 +45,12 @@ code-validator は、ソースコードを読んで「危険な書き方」（�
 | 計画 [plan.md](plan.md) の Phase 2 に「テストスイート整備」が未着手と書いてある | テストは既にある。[STATUS.md](STATUS.md) が現行 |
 | [docs/dev/architecture.md](docs/dev/architecture.md) の「約 946 行」 | 古い数字。`validator.py` はもっと長い |
 | README は pydantic を唯一の必須依存と説明するが、`validator.py` は pydantic を読み込んでいない（`git grep -n pydantic validator.py` が 0 件） | 動作に pydantic は使われていない。依存の整理は判断が必要なので、このガイドでは触らない |
+| README.md・spec.md は「完全オフライン／外部通信なし」と説明するが、`requirements.txt` か `package.json` がある場所を `--path` で検査すると、`pip-audit` / `npm audit` が入っていれば外部の脆弱性データベースへ問い合わせる（`validator.py` の `DependencyChecker.check_dependencies`。`--git-diff` の有無に関係なく動く） | 通信するのは依存検査だけ。ソースコードは送られない。通信を避けるなら、両ファイルの無いフォルダを指す |
+| CLAUDE.md が仕組みとして挙げる todo.md・knowledge.md・memory.md はリポジトリに無い（.gitignore 対象のローカル限定ファイル。STATUS.md にも todo.md はローカル限定とある） | 共有される現在地は [STATUS.md](STATUS.md)。無いファイルを探さなくてよい |
 
 ## よくある作業（逆引き）
 
-触る場所のほかに、**同じ値を手で写している場所**があります。下の `git grep` の出力に出た文書も合わせてください（テストが見ているのは特定の値だけで、文書との一致は見ていません）。
+表中の `git grep ... ':!validator.py'` は bash・PowerShell で打てる書き方です（cmd.exe ではシングルクォートが効かないので、cmd では `":!validator.py"` にします）。触る場所のほかに、**同じ値を手で写している場所**があります。下の `git grep` の出力に出た文書も合わせてください（テストが見ているのは特定の値だけで、文書との一致は見ていません）。
 
 | やりたいこと | 触るファイル | 手で合わせる所・確かめ方 |
 |---|---|---|
@@ -93,5 +95,4 @@ code-validator は、ソースコードを読んで「危険な書き方」（�
 | pip-audit / npm audit | Python / Node.js の依存ライブラリに既知の脆弱性がないか調べる外部ツール。本ツールはこれを呼び出す |
 | Dependabot | 依存ライブラリの更新を自動で提案する GitHub の機能 |
 | CodeQL | GitHub のコード解析機能。`.github/workflows/codeql.yml` で動く |
-| frontmatter | 文書の先頭で `---` に囲まれた設定部分。このリポジトリの文書には使われていない |
 | `llms.txt` | AI 検索エンジン向けに書いたプロジェクト要約（ルート直下と `docs/` に同じ内容がある） |
