@@ -544,7 +544,7 @@ class SecurityScanner:
     # セキュリティヘッダーは専用のミドルウェアモジュールに置き、アプリ生成箇所で
     # add_middleware する構成が標準であり、ヘッダー名は定義側のファイルにしか
     # 現れない。実コーパスでの計測では、正しくミドルウェアを実装しているアプリを
-    # 「未設定」と誤って指摘した（ORICON-Chart-Dashboard/web/app.py。実際は
+    # 「未設定」と誤って指摘した（あるダッシュボードアプリの web/app.py。実際は
     # web/middleware.py の SecurityHeadersMiddleware で設定済み）。
     #
     # 誤検知を絞り込む方向では解決できず、必要なのはモジュール横断の解析。
