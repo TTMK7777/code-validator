@@ -31,6 +31,9 @@
   - SEC006 が `BETWEEN {a} AND {b}` と `VALUES (1, {x})` の 2 要素目を見逃していた
     （`IN (SELECT ...)` の副問い合わせは除く）
   - SEC003 が 1 行に複数ある接続文字列の 2 つ目以降を見ていなかった
+- PR #98 への Codex の指摘: 3.11 以前で f 文字列全体をコード扱いに戻したため、
+  `f"Never use eval() for {name}"` の説明文に反応していた → 文字の部分と式の中の
+  文字列だけを外す（PR #99）
 - CodeQL が 11-15 から赤のままだった（init と analyze の版ずれ）。版をそろえ、
   Dependabot で `codeql-action` を 1 つの PR にまとめるようにした。
 - CI に Python 3.11 のテストを追加（validate.yml は 3.11 で動くのに、テストは 3.12 だけだった）。

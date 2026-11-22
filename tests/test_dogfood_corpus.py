@@ -323,3 +323,48 @@ def test_sec003_checks_every_url_on_the_line(scan) -> None:
     code = ('CFG = {"example": "postgresql://user:pass@localhost/db", '
             '"production": "postgresql://admin:Tr0ub4dor3@db.internal/app"}')
     assert_fires(scan(code), "SEC003")
+
+
+# --- PR #98 への Codex の指摘 -----------------------------------------------
+#
+# 3.11 以前で f 文字列全体を「コード」扱いに戻したため、説明文の部分まで
+# 検査された。式の部分だけをコードとして残し、文字の部分と式の中の文字列は外す。
+# 公開経路の検査は 3.11 の CI ジョブで、3.12 以降でも動く内部の切り分けは
+# 下の _fstring_literal_spans のテストで確かめる。
+
+@pytest.mark.parametrize(
+    ("code", "rule_id"),
+    [
+        ('logger.warning(f"Never use eval() for {name}")', "SEC013"),
+        ('msg = f"Do not use pickle.loads() for {name}"', "SEC012"),
+        ("msg = f'{name!r}: avoid eval() here'", "SEC013"),
+    ],
+)
+def test_fstring_literal_text_is_not_code(scan, code: str, rule_id: str) -> None:
+    assert_silent(scan(code), rule_id)
+
+
+def _covered(spans, row: int, col: int) -> bool:
+    return any(start <= (row, col) < end for start, end in spans)
+
+
+def test_fstring_literal_spans_split_text_and_expressions() -> None:
+    from validator import SecurityScanner
+
+    tok = 'f"Never eval() {eval(x)} {d[\'k\']:>{w}}"'
+    spans = SecurityScanner._fstring_literal_spans(tok, (1, 4))
+    col = lambda needle, nth=0: 4 + [i for i in range(len(tok)) if tok.startswith(needle, i)][nth]
+    assert _covered(spans, 1, col("eval(")), "文字の部分の eval( が外れていない"
+    assert not _covered(spans, 1, col("eval(", 1)), "式の中の eval( まで外れている"
+    assert _covered(spans, 1, col("'k'")), "式の中の文字列が外れていない"
+    assert not _covered(spans, 1, col("d[")), "式の中の名前まで外れている"
+
+
+def test_fstring_literal_spans_multiline_triple_quoted() -> None:
+    from validator import SecurityScanner
+
+    tok = 'f"""line1 eval()\nline2 {eval(x)}\n"""'
+    spans = SecurityScanner._fstring_literal_spans(tok, (3, 8))
+    assert _covered(spans, 3, 8 + tok.index("eval()"))
+    assert not _covered(spans, 4, len("line2 {"))
+    assert _covered(spans, 4, 0)
