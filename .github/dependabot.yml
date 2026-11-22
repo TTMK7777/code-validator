@@ -19,6 +19,12 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 3
+    # codeql-action の init と analyze は同じ版でないと失敗する。別々の PR で
+    # analyze だけ上がり、11-15 以降 CodeQL が赤のままだった。
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
     labels:
       - "dependencies"
       - "ci"

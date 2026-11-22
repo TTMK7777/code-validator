@@ -252,10 +252,13 @@ class SecurityScanner:
     FSTRING_FIELD = re.compile(r'(?<!\{)\{([^{}]+)\}(?!\})')
     # 差し込みが「値の位置」にある印。比較演算子・LIKE・LIMIT/OFFSET の直後か、
     # 引用符や % で囲まれている（'{name}' / '%{q}%'）。
-    SQL_VALUE_BEFORE = re.compile(r'(?:[=<>]|\bLIKE|\bLIMIT|\bOFFSET)\s*$', re.IGNORECASE)
+    SQL_VALUE_BEFORE = re.compile(
+        r'(?:[=<>]|\bLIKE|\bLIMIT|\bOFFSET|\bBETWEEN|\bBETWEEN\s+\S+\s+AND)\s*$', re.IGNORECASE
+    )
     SQL_QUOTED_BEFORE = re.compile(r'(?<![fFrRbBuU])[\'"%]$')
-    # IN (...) / VALUES (...) の中身。プレースホルダ列なら安全。
-    SQL_LIST_BEFORE = re.compile(r'\b(?:IN|VALUES)\s*\(\s*$', re.IGNORECASE)
+    # IN (...) / VALUES (...) の中（2 要素目以降を含む）。プレースホルダ列なら安全。
+    # `IN (SELECT ...)` の副問い合わせは値のリストではないので除く。
+    SQL_LIST_BEFORE = re.compile(r'\b(?:IN|VALUES)\s*\((?!\s*(?:SELECT|WITH)\b)[^()]*$', re.IGNORECASE)
 
     # 危険な逆シリアライズ。
     UNSAFE_DESERIALIZE_PATTERNS = [
@@ -374,8 +377,10 @@ class SecurityScanner:
             
             # データベースURLの検出
             for pattern in self.CREDENTIAL_PATTERNS['database_url']:
-                found = re.search(pattern, line, re.IGNORECASE)
-                if found and not self._is_comment_or_docstring(line) and not self._is_url_placeholder(found.group(0)):
+                # 1 行に複数あるとき、先頭が書式例でも後ろの実値を見逃さない
+                real = [m for m in re.finditer(pattern, line, re.IGNORECASE)
+                        if not self._is_url_placeholder(m.group(0))]
+                if real and not self._is_comment_or_docstring(line):
                     issues.append(Issue(
                         severity=Severity.CRITICAL,
                         category="security",
@@ -617,7 +622,7 @@ class SecurityScanner:
 
         # Python は文字列・コメントの範囲を字句解析で求め、その中の一致を外す。
         # 説明文やパターン定義の文字列は実行されないため。
-        # f 文字列の式部分（`f"{eval(x)}"`）は Python 3.12 以降なら文字列扱いにならない。
+        # f 文字列の式部分（`f"{eval(x)}"`）は外さない（_python_non_code_spans 参照）。
         non_code = self._python_non_code_spans('\n'.join(lines)) if file_path.suffix == '.py' else []
 
         def in_code(line_num: int, col: int) -> bool:
@@ -698,8 +703,16 @@ class SecurityScanner:
         spans = []
         try:
             for tok in tokenize.generate_tokens(io.StringIO(content).readline):
-                if tok.type in kinds:
-                    spans.append((tok.start, tok.end))
+                if tok.type not in kinds:
+                    continue
+                # Python 3.11 以前は f 文字列全体が 1 つの STRING トークンになり、
+                # 式部分（`f"{eval(x)}"`）まで外れてしまう。f 文字列は外さない
+                # （3.12 以降は FSTRING_MIDDLE として文字部分だけが来る）。
+                if tok.type == tokenize.STRING:
+                    prefix = re.match(r'[A-Za-z]*', tok.string).group(0)
+                    if 'f' in prefix.lower():
+                        continue
+                spans.append((tok.start, tok.end))
         except Exception:  # noqa: BLE001
             # 字句解析の失敗を scan_file まで上げると、そのファイルの指摘が
             # 全ルール分まとめて消える（偽グリーン）。ここで握って検出側に倒す。
@@ -1229,6 +1242,8 @@ class CodeValidator:
 
         self_path = Path(__file__).resolve()
         files_to_check = [f for f in files_to_check if f.resolve() != self_path]
+        # 全体走査・差分走査の両方に効かせる（CI は差分走査）
+        files_to_check = self._drop_oversized(files_to_check)
 
         logger.info(f"検証対象ファイル数: {len(files_to_check)}")
         
@@ -1278,7 +1293,7 @@ class CodeValidator:
             and p.is_file()
             and not self._is_excluded(p, project_path, exclude_patterns)
         ]
-        return self._drop_oversized(files)
+        return files
 
     @staticmethod
     def _git_visible_files(project_path: Path) -> Optional[List[Path]]:
@@ -1287,16 +1302,20 @@ class CodeValidator:
         git 管理下でない・git が無い・失敗した場合は None を返し、呼び出し側で
         ディレクトリ走査に戻す。
         """
-        try:
-            result = subprocess.run(
-                ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
-                cwd=project_path, capture_output=True, timeout=60,
-            )
-        except (subprocess.SubprocessError, OSError):
-            return None
-        if result.returncode != 0:
-            return None
-        names = result.stdout.decode('utf-8', errors='replace').split('\0')
+        # --recurse-submodules は --others と併用できないため 2 回に分ける。
+        # 1 回目で初期化済みサブモジュールの中の追跡ファイルまで展開する。
+        names: List[str] = []
+        for args in (['--cached', '--recurse-submodules'], ['--others', '--exclude-standard']):
+            try:
+                result = subprocess.run(
+                    ['git', 'ls-files', '-z', *args],
+                    cwd=project_path, capture_output=True, timeout=60,
+                )
+            except (subprocess.SubprocessError, OSError):
+                return None
+            if result.returncode != 0:
+                return None
+            names += result.stdout.decode('utf-8', errors='replace').split('\0')
         # --cached は作業ツリーで削除済みのファイルも返すので、実在するものだけ残す
         return sorted({project_path / name for name in names if name and (project_path / name).is_file()})
 
