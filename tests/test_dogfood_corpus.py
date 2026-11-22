@@ -368,3 +368,26 @@ def test_fstring_literal_spans_multiline_triple_quoted() -> None:
     assert _covered(spans, 3, 8 + tok.index("eval()"))
     assert not _covered(spans, 4, len("line2 {"))
     assert _covered(spans, 4, 0)
+
+
+# --- PR #99 への Codex の指摘 -----------------------------------------------
+
+def test_sec011_checks_later_matches_after_excluded_text(scan) -> None:
+    """文字列の中の説明文を外したあと、同じ行の後ろの実際の呼び出しを見逃さないこと."""
+    code = 'msg = "Never os.system(" + x; os.system("echo " + name)'
+    assert_fires(scan(code), "SEC011")
+
+
+def test_nested_fstring_expression_fires(scan) -> None:
+    assert_fires(scan("msg = f\"{f'{eval(user_input)}'}\""), "SEC013")
+
+
+def test_fstring_literal_spans_recurse_into_nested_fstring() -> None:
+    from validator import SecurityScanner
+
+    tok = "f\"{f'Never eval() {eval(x)}'}\""
+    spans = SecurityScanner._fstring_literal_spans(tok, (1, 0))
+    first = tok.index("eval(")
+    second = tok.index("eval(", first + 1)
+    assert _covered(spans, 1, first), "内側の f 文字列の文字部分が外れていない"
+    assert not _covered(spans, 1, second), "内側の f 文字列の式まで外れている"
