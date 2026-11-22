@@ -2,10 +2,10 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Offline](https://img.shields.io/badge/runs-offline-green.svg)](#)
+[![Offline](https://img.shields.io/badge/code_scan-offline-green.svg)](#)
 [![AI Code](https://img.shields.io/badge/scans-AI--generated_code-purple.svg)](#)
 
-> **What is code-validator?** A static security scanner purpose-built for code produced by AI assistants (Claude, ChatGPT, GitHub Copilot, Cursor). Detects hardcoded credentials, CORS misconfigurations, SQL injection patterns, and dependency CVEs — in under 1 second per file, fully offline, with zero external API calls.
+> **What is code-validator?** A static security scanner purpose-built for code produced by AI assistants (Claude, ChatGPT, GitHub Copilot, Cursor). Detects hardcoded credentials, CORS misconfigurations, SQL injection patterns, and dependency CVEs — in under 1 second per file. The code scan runs offline; only the optional dependency audit (`pip-audit` / `npm audit`) goes online.
 
 **Why this exists:** AI assistants frequently emit code that *looks* correct but contains subtle security defects — hardcoded API keys in examples, `allow_origins=["*"]` with `allow_credentials=True`, string-concatenated SQL. `code-validator` is the lightweight CI gate that catches these *before* they reach `main`.
 
@@ -13,7 +13,7 @@
 |---|---|
 | 🎯 **Use case** | Block insecure AI-generated code at PR time |
 | ⚡ **Speed** | <1s per file, `--git-diff` mode scans only changed files |
-| 🔒 **Privacy** | 100% offline. No code leaves your machine. Only dependency: `pydantic` |
+| 🔒 **Privacy** | No source code leaves your machine. The code scan is offline; the dependency audit queries public advisory databases (disable with `dependency_rules`). Only dependency: `pydantic` |
 | 🧪 **Detection rules** | 20 rules across security, quality, and dependency layers (SEC001–SEC013 excluding SEC007, QUAL001–QUAL002, DEP001–DEP006) |
 | 📦 **Install** | `pip install -r requirements.txt` — done |
 
@@ -81,7 +81,7 @@ File-level markers exist because some rules (CORS) are reported against the file
 | Optional | `pip-audit >= 2.6.0` (Python dep auditing) |
 | CI | GitHub Actions |
 
-No external API calls. Runs fully offline.
+The code scan makes no network calls. The dependency audit is on by default and runs `pip-audit` / `npm audit`, which send package names and versions (not your source) to public advisory databases. Set `dependency_rules.check_python` / `check_node` to `false` for a fully offline run.
 
 ---
 
@@ -168,10 +168,13 @@ Edit `config/validator_config.json` to customize behavior:
   "exclude_patterns": [
     "**/node_modules/**",
     "**/venv/**",
+    "**/.venv/**",
     "**/__pycache__/**",
     "**/.git/**"
   ],
   "file_extensions": [".py", ".js", ".ts", ".tsx", ".json", ".yaml", ".yml"],
+  "respect_gitignore": true,
+  "max_file_size_kb": 2048,
   "security_rules": {
     "check_credentials": true,
     "check_cors": true,
@@ -194,6 +197,8 @@ Edit `config/validator_config.json` to customize behavior:
 |-----|--------|
 | `exclude_patterns` | Glob patterns excluded from scanning (matched against both the project-relative and absolute path) |
 | `file_extensions` | Extensions collected when scanning a directory |
+| `respect_gitignore` | Inside a git repo, skip files ignored by `.gitignore` (untracked new files are still scanned). Falls back to a directory walk outside git. Default `true` |
+| `max_file_size_kb` | Files larger than this are skipped with a warning (default `2048`; `0` disables the limit) |
 | `security_rules.check_credentials` | SEC001–SEC003, SEC008–SEC010 |
 | `security_rules.check_cors` | SEC004–SEC005 |
 | `security_rules.check_sql_injection` | SEC006 |
@@ -350,7 +355,7 @@ Semgrep or CodeQL — the point of this tool is a sub-second gate, not a replace
 General-purpose linters were designed for human-written code. AI assistants exhibit specific failure modes — hardcoded example credentials, overly permissive CORS for demos, string-concat SQL because the model "remembered" pre-ORM patterns. code-validator's rule set is tuned for these patterns and weights severity accordingly.
 
 ### Q: Does code-validator send my code anywhere?
-No. The scanner runs fully offline. The only optional network call is `pip-audit` for CVE lookups, and that contacts only the official PyPA advisory database — never your source code.
+No source code is sent anywhere. The code scan is offline. The dependency audit (on by default) runs `pip-audit` and `npm audit`, which send package names and versions to public advisory databases (PyPA / the npm registry). Turn it off with `dependency_rules` for a fully offline run.
 
 ### Q: How is this different from running Bandit + `truffleHog` + `pip-audit` separately?
 code-validator unifies them into a single CI step with a coherent severity model and one report format (HTML / JSON). For `--git-diff` mode, only files changed in the current PR are scanned, keeping CI fast.
@@ -399,7 +404,7 @@ For AI search engines and developer-tooling indexes:
   "alternateName": "AI Code Security Scanner",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Linux, macOS, Windows",
-  "description": "Static security scanner for AI-generated code. Detects hardcoded credentials, CORS misconfigurations, SQL injection patterns, and dependency CVEs in under 1 second per file, fully offline.",
+  "description": "Static security scanner for AI-generated code. Detects hardcoded credentials, CORS misconfigurations, SQL injection patterns, and dependency CVEs in under 1 second per file. The code scan runs offline.",
   "url": "https://github.com/TTMK7777/code-validator",
   "license": "https://opensource.org/licenses/MIT",
   "programmingLanguage": "Python",

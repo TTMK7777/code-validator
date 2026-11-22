@@ -239,11 +239,23 @@ class SecurityScanner:
 
     # 文字列リテラルが SQL 文そのもので始まっているか。
     # 接頭辞 (f/r/b/u) と三重引用符、先頭の改行・空白を許容する。
+    # 直後が引用符・ハイフンのものは単語であって SQL 文ではない
+    # （実コーパスで誤検知した `'update' if ...` / `"update-index"`）。
     SQL_STRING_START = re.compile(
         r'[rbuf]{0,2}["\']{1,3}\s*'
-        r'\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|WITH|MERGE|REPLACE\s+INTO|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE)\b',
+        r'\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|WITH|MERGE|REPLACE\s+INTO|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE)\b'
+        r'(?![\-\'"])',
         re.IGNORECASE,
     )
+
+    # f 文字列の差し込み `{...}`（`{{` `}}` のエスケープは除く）。
+    FSTRING_FIELD = re.compile(r'(?<!\{)\{([^{}]+)\}(?!\})')
+    # 差し込みが「値の位置」にある印。比較演算子・LIKE・LIMIT/OFFSET の直後か、
+    # 引用符や % で囲まれている（'{name}' / '%{q}%'）。
+    SQL_VALUE_BEFORE = re.compile(r'(?:[=<>]|\bLIKE|\bLIMIT|\bOFFSET)\s*$', re.IGNORECASE)
+    SQL_QUOTED_BEFORE = re.compile(r'(?<![fFrRbBuU])[\'"%]$')
+    # IN (...) / VALUES (...) の中身。プレースホルダ列なら安全。
+    SQL_LIST_BEFORE = re.compile(r'\b(?:IN|VALUES)\s*\(\s*$', re.IGNORECASE)
 
     # 危険な逆シリアライズ。
     UNSAFE_DESERIALIZE_PATTERNS = [
@@ -362,7 +374,8 @@ class SecurityScanner:
             
             # データベースURLの検出
             for pattern in self.CREDENTIAL_PATTERNS['database_url']:
-                if re.search(pattern, line, re.IGNORECASE) and not self._is_comment_or_docstring(line):
+                found = re.search(pattern, line, re.IGNORECASE)
+                if found and not self._is_comment_or_docstring(line) and not self._is_url_placeholder(found.group(0)):
                     issues.append(Issue(
                         severity=Severity.CRITICAL,
                         category="security",
@@ -437,7 +450,23 @@ class SecurityScanner:
         if any(token in value for token in ('os.environ', 'getenv', 'process.env', '${', '{{')):
             return True
         return False
-    
+
+    def _is_url_placeholder(self, matched: str) -> bool:
+        """接続文字列 `scheme://user:pass@` のパスワード部分が説明用の値かどうか。
+
+        実コーパスでは docstring 本文の `postgresql://user:pass@host` 例に反応していた。
+        `pass` 単体は実在のパスワードでもありうるので、ユーザー名も `user` 系の
+        書式例の定型 (`user:pass`) のときだけ外す。
+        """
+        userinfo = matched.rsplit('@', 1)[0].split('://', 1)[-1]
+        user, _, password = userinfo.partition(':')
+        if user.lower() in ('user', 'username') and password.lower() == 'pass':
+            return True
+        if self._is_placeholder(password):
+            return True
+        # <password> / {password} / ${PASSWORD} のような差し込み記法
+        return bool(re.fullmatch(r'<[^>]*>|\$?\{[^}]*\}', password))
+
     def _scan_cors(self, file_path: Path, lines: List[str]) -> List[Issue]:
         """CORS設定の検出"""
         issues = []
@@ -503,10 +532,13 @@ class SecurityScanner:
             # いた）。SQL文字列内に引用符が混在する（例 '{tok}'）ため範囲を
             # 厳密に取らず、同一行に f文字列・SQLキーワード・{...} 補間が
             # 揃うことを条件とするヒューリスティック。
+            # 差し込み先が列名・テーブル名・WHERE 句のような「固定の部品」なら
+            # 注入経路ではない（実コーパスの 48 件はすべてこの形だった）。
+            # 値の位置への差し込みだけを報告する。
             fstring_sqli = (
                 has_sql_kw
                 and re.search(r'f["\']', line)
-                and re.search(r'\{[^}]+\}', line)
+                and self._has_value_interpolation(line)
             )
             # パターン3: str.format() による動的SQL。
             #   "SELECT ... WHERE name = '{}'".format(name)
@@ -537,7 +569,24 @@ class SecurityScanner:
                 ))
         
         return issues
-    
+
+    def _has_value_interpolation(self, line: str) -> bool:
+        """f 文字列の差し込みのうち、SQL の値の位置にあるものがあるか。
+
+        行単位の判定なので、変数の中身（`where` が固定の句か利用者入力か）までは
+        追えない。値の位置かどうかという形だけで判断する。
+        """
+        for match in self.FSTRING_FIELD.finditer(line):
+            before = line[:match.start()]
+            expr = match.group(1).strip()
+            if self.SQL_VALUE_BEFORE.search(before) or self.SQL_QUOTED_BEFORE.search(before):
+                if not expr.startswith('int('):
+                    return True
+            elif self.SQL_LIST_BEFORE.search(before):
+                if '?' not in expr and '%s' not in expr and 'placeholder' not in expr.lower():
+                    return True
+        return False
+
     # SEC007（FastAPI のセキュリティヘッダー欠落）は削除した。
     #
     # 理由: 行単位・ファイル単位のスキャナでは原理的に判定できない。
@@ -560,6 +609,20 @@ class SecurityScanner:
           SEC013 動的コード実行 (eval / exec)
         """
         issues = []
+
+        # JSON は実行されない。実コーパスでは方針文書の説明文
+        # （"Never use pickle.loads() ... or eval()"）に反応していた。
+        if file_path.suffix.lower() == '.json':
+            return issues
+
+        # Python は文字列・コメントの範囲を字句解析で求め、その中の一致を外す。
+        # 説明文やパターン定義の文字列は実行されないため。
+        # f 文字列の式部分（`f"{eval(x)}"`）は Python 3.12 以降なら文字列扱いにならない。
+        non_code = self._python_non_code_spans('\n'.join(lines)) if file_path.suffix == '.py' else []
+
+        def in_code(line_num: int, col: int) -> bool:
+            pos = (line_num, col)
+            return not any(start <= pos < end for start, end in non_code)
 
         checks = (
             (
@@ -590,7 +653,8 @@ class SecurityScanner:
             # 注入経路ではないため、実コーパスでは誤検知しか生まなかった。
             if self.DYNAMIC_STRING_MARKER.search(line):
                 for pattern in self.COMMAND_EXEC_DYNAMIC_PATTERNS:
-                    if re.search(pattern, line):
+                    found = re.search(pattern, line)
+                    if found and in_code(line_num, found.start()):
                         issues.append(Issue(
                             severity=Severity.HIGH,
                             category="security",
@@ -605,7 +669,7 @@ class SecurityScanner:
 
             for patterns, rule_id, message, suggestion in checks:
                 for pattern in patterns:
-                    if re.search(pattern, line):
+                    if any(in_code(line_num, m.start()) for m in re.finditer(pattern, line)):
                         issues.append(Issue(
                             severity=Severity.HIGH,
                             category="security",
@@ -619,6 +683,28 @@ class SecurityScanner:
                         break
 
         return issues
+
+    @staticmethod
+    def _python_non_code_spans(content: str) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
+        """Python ソースの文字列リテラルとコメントの範囲を (開始, 終了) の組で返す。
+
+        位置は (行番号 1 始まり, 列 0 始まり)。構文エラー等で字句解析が途中で
+        止まった場合は、そこまでに得た範囲だけを返す（範囲が狭いほど検出側に倒れる）。
+        """
+        kinds = {tokenize.STRING, tokenize.COMMENT}
+        fstring_middle = getattr(tokenize, 'FSTRING_MIDDLE', None)
+        if fstring_middle is not None:
+            kinds.add(fstring_middle)
+        spans = []
+        try:
+            for tok in tokenize.generate_tokens(io.StringIO(content).readline):
+                if tok.type in kinds:
+                    spans.append((tok.start, tok.end))
+        except Exception:  # noqa: BLE001
+            # 字句解析の失敗を scan_file まで上げると、そのファイルの指摘が
+            # 全ルール分まとめて消える（偽グリーン）。ここで握って検出側に倒す。
+            pass
+        return spans
 
     @staticmethod
     def _is_commented_out(line: str) -> bool:
@@ -1106,12 +1192,19 @@ class CodeValidator:
             'exclude_patterns': [
                 '**/node_modules/**',
                 '**/venv/**',
+                '**/.venv/**',
                 '**/__pycache__/**',
                 '**/.git/**',
                 '**/dist/**',
                 '**/build/**',
             ],
             'file_extensions': ['.py', '.js', '.ts', '.tsx', '.json', '.yaml', '.yml'],
+            # git 管理下のフォルダでは .gitignore で無視されたファイルを見ない。
+            # まだ add していない新規ファイルは見る（コミット前に止めたいため）。
+            'respect_gitignore': True,
+            # これを超えるファイルは読まずに警告だけ出す。実コーパスでは無視された
+            # data/ の 200MB 級 JSON で 10 分を超えても終わらなかった。
+            'max_file_size_kb': 2048,
         }
         
         if config_path and config_path.exists():
@@ -1170,16 +1263,59 @@ class CodeValidator:
     
     def _get_all_files(self, project_path: Path) -> List[Path]:
         """すべての検証対象ファイルを取得"""
-        files = []
         exclude_patterns = self.config.get('exclude_patterns', [])
         file_extensions = self.config.get('file_extensions', ['.py'])
 
-        for ext in file_extensions:
-            for file_path in project_path.rglob(f'*{ext}'):
-                if not self._is_excluded(file_path, project_path, exclude_patterns):
-                    files.append(file_path)
+        candidates = None
+        if self.config.get('respect_gitignore', True):
+            candidates = self._git_visible_files(project_path)
+        if candidates is None:
+            candidates = [p for ext in file_extensions for p in project_path.rglob(f'*{ext}')]
 
-        return files
+        files = [
+            p for p in candidates
+            if p.suffix in file_extensions
+            and p.is_file()
+            and not self._is_excluded(p, project_path, exclude_patterns)
+        ]
+        return self._drop_oversized(files)
+
+    @staticmethod
+    def _git_visible_files(project_path: Path) -> Optional[List[Path]]:
+        """git から見えるファイル（追跡中 + 無視されていない未追跡）を返す。
+
+        git 管理下でない・git が無い・失敗した場合は None を返し、呼び出し側で
+        ディレクトリ走査に戻す。
+        """
+        try:
+            result = subprocess.run(
+                ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+                cwd=project_path, capture_output=True, timeout=60,
+            )
+        except (subprocess.SubprocessError, OSError):
+            return None
+        if result.returncode != 0:
+            return None
+        names = result.stdout.decode('utf-8', errors='replace').split('\0')
+        # --cached は作業ツリーで削除済みのファイルも返すので、実在するものだけ残す
+        return sorted({project_path / name for name in names if name and (project_path / name).is_file()})
+
+    def _drop_oversized(self, files: List[Path]) -> List[Path]:
+        """上限を超えるファイルを除き、除いたことを警告に出す（黙って見落とさない）。"""
+        limit_kb = self.config.get('max_file_size_kb')
+        if not limit_kb:
+            return files
+        kept = []
+        for p in files:
+            try:
+                size = p.stat().st_size
+            except OSError:
+                continue
+            if size > limit_kb * 1024:
+                logger.warning(f"サイズ上限 ({limit_kb}KB) を超えるため走査しません: {p} ({size // 1024}KB)")
+            else:
+                kept.append(p)
+        return kept
 
     @staticmethod
     def _is_excluded(file_path: Path, project_path: Path, exclude_patterns: List[str]) -> bool:
@@ -1430,6 +1566,14 @@ def generate_html_report(result: ValidationResult, output_path: Path):
 
 def main():
     """メイン関数"""
+    # 出力先が cp932 等で絵文字を表せないと、要約の表示で UnicodeEncodeError に
+    # なり、指摘 0 件でも終了コード 1（＝指摘ありと同じ値）で落ちていた。
+    # 表せない文字は ? に置き換えて表示を続ける。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors='replace')
+        except (AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser(description='ClaudeCode自動検証システム')
     parser.add_argument('--path', type=str, default='.', help='検証するプロジェクトのパス')
     parser.add_argument('--git-diff', action='store_true', help='Git差分のみを検証')
