@@ -4,20 +4,20 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>code-validator — Static Security Scanner for AI-Generated Code</title>
-<meta name="description" content="Static security scanner purpose-built for AI-generated code (Claude Code, GitHub Copilot, ChatGPT, Cursor). Detects hardcoded credentials, CORS misconfigurations, SQL injection, and dependency CVEs in under 1 second per file — fully offline, zero data exfiltration. MIT licensed.">
+<meta name="description" content="Static security scanner purpose-built for AI-generated code (Claude Code, GitHub Copilot, ChatGPT, Cursor). Detects hardcoded credentials, CORS misconfigurations, SQL injection, and dependency CVEs in under 1 second per file. Your source code never leaves your machine. MIT licensed.">
 <meta name="keywords" content="AI security, static analysis, code validation, AI-generated code, CI/CD security, secret detection, CORS validation, dependency audit, Claude Code, GitHub Copilot, LLM security, DevSecOps">
 <meta name="author" content="Taimu Tsuji">
 
 <!-- Open Graph -->
 <meta property="og:title" content="code-validator — Static Security Scanner for AI-Generated Code">
-<meta property="og:description" content="Detects hardcoded credentials, CORS misconfigurations, SQL injection, and dependency CVEs in AI-generated code. <1s per file, fully offline, MIT licensed.">
+<meta property="og:description" content="Detects hardcoded credentials, CORS misconfigurations, SQL injection, and dependency CVEs in AI-generated code. <1s per file, source never leaves your machine, MIT licensed.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://ttmk7777.github.io/code-validator/">
 
 <!-- Twitter Card -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="code-validator — AI Code Security Scanner">
-<meta name="twitter:description" content="Static security scanner purpose-built for AI-generated code. <1s/file, fully offline, MIT licensed.">
+<meta name="twitter:description" content="Static security scanner purpose-built for AI-generated code. <1s/file, offline code scan, MIT licensed.">
 
 <!-- Schema.org JSON-LD: SoftwareApplication -->
 <script type="application/ld+json">
@@ -29,7 +29,7 @@
   "applicationCategory": "DeveloperApplication",
   "applicationSubCategory": "Security Scanner",
   "operatingSystem": "Linux, macOS, Windows",
-  "description": "Static security scanner for AI-generated code. Detects hardcoded credentials, CORS misconfigurations, SQL injection patterns, and dependency CVEs in under 1 second per file, fully offline.",
+  "description": "Static security scanner for AI-generated code. Detects hardcoded credentials, CORS misconfigurations, SQL injection patterns, and dependency CVEs in under 1 second per file. The code scan runs offline.",
   "url": "https://github.com/TTMK7777/code-validator",
   "downloadUrl": "https://github.com/TTMK7777/code-validator",
   "license": "https://opensource.org/licenses/MIT",
@@ -70,7 +70,7 @@
       "name": "Does code-validator send my code anywhere?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "No. The scanner runs fully offline. The only optional network call is pip-audit for CVE lookups, and that contacts only the official PyPA advisory database — never your source code."
+        "text": "No source code is sent anywhere. The code scan is offline. The dependency audit (on by default) runs pip-audit and npm audit, which send package names and versions to public advisory databases (PyPA / the npm registry). Turn it off with dependency_rules for a fully offline run."
       }
     },
     {
@@ -219,7 +219,7 @@ footer a { color: var(--accent); }
     <div class="badges">
       <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
       <img src="https://img.shields.io/badge/python-3.9+-blue.svg" alt="Python 3.9+">
-      <img src="https://img.shields.io/badge/runs-offline-green.svg" alt="Offline">
+      <img src="https://img.shields.io/badge/code_scan-offline-green.svg" alt="Offline code scan">
       <img src="https://img.shields.io/badge/scans-AI--generated_code-purple.svg" alt="AI Code">
     </div>
     <div class="cta">
@@ -237,7 +237,7 @@ footer a { color: var(--accent); }
       <strong>code-validator</strong> is a static security scanner purpose-built for code produced by AI assistants — Claude Code, ChatGPT, GitHub Copilot, Cursor. It detects the <em>specific failure modes</em> that LLMs disproportionately emit: hardcoded API keys in examples, <code>allow_origins=["*"]</code> with <code>allow_credentials=True</code>, string-concatenated SQL, and unpatched dependency CVEs.
     </p>
     <p>
-      <strong>Why this exists:</strong> AI-assisted PRs frequently land with subtle security defects that look correct at a glance. <code>code-validator</code> is the lightweight CI gate that catches these <em>before</em> they reach <code>main</code> — in under 1 second per file, fully offline, with zero data exfiltration.
+      <strong>Why this exists:</strong> AI-assisted PRs frequently land with subtle security defects that look correct at a glance. <code>code-validator</code> is the lightweight CI gate that catches these <em>before</em> they reach <code>main</code> — in under 1 second per file, without sending your source code anywhere.
     </p>
 
     <div class="feature-grid">
@@ -248,8 +248,8 @@ footer a { color: var(--accent); }
       </div>
       <div class="feature-card">
         <div class="icon">🔒</div>
-        <h4>100% Offline</h4>
-        <p>No SaaS. No code leaves your machine. Only dep: <code>pydantic</code>.</p>
+        <h4>Offline code scan</h4>
+        <p>No SaaS. No code leaves your machine. Only the optional dependency audit goes online. Only dep: <code>pydantic</code>.</p>
       </div>
       <div class="feature-card">
         <div class="icon">🎯</div>
@@ -320,7 +320,7 @@ python validator.py --git-diff || exit 1</code></pre>
         <tr><th>Tool</th><th>AI-code focus</th><th>Offline</th><th>Speed</th><th>Deps</th></tr>
       </thead>
       <tbody>
-        <tr><td><strong>code-validator</strong></td><td>✅ Purpose-built</td><td>✅ Yes</td><td>&lt;1s/file</td><td>✅ pydantic only</td></tr>
+        <tr><td><strong>code-validator</strong></td><td>✅ Purpose-built</td><td>✅ Code scan (dep audit online)</td><td>&lt;1s/file</td><td>✅ pydantic only</td></tr>
         <tr><td>Bandit</td><td>❌ General Python</td><td>✅ Yes</td><td>Fast</td><td>Multiple</td></tr>
         <tr><td>Semgrep</td><td>❌ Multi-lang patterns</td><td>⚠️ Hybrid</td><td>Medium</td><td>Heavy</td></tr>
         <tr><td>GitGuardian</td><td>❌ Git secrets</td><td>❌ SaaS</td><td>Slow (API)</td><td>SaaS</td></tr>
@@ -344,7 +344,7 @@ python validator.py --git-diff || exit 1</code></pre>
 
     <details>
       <summary>Does code-validator send my code anywhere?</summary>
-      <p>No. The scanner runs fully offline. The only optional network call is <code>pip-audit</code> for CVE lookups, and that contacts only the official PyPA advisory database — never your source code.</p>
+      <p>No source code is sent anywhere. The code scan is offline. The dependency audit (on by default) runs <code>pip-audit</code> and <code>npm audit</code>, which send package names and versions to public advisory databases (PyPA / the npm registry). Turn it off with <code>dependency_rules</code> for a fully offline run.</p>
     </details>
 
     <details>

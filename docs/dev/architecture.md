@@ -1,9 +1,10 @@
 # アーキテクチャ (Architecture)
 
 code-validator は **単一ファイルのモノリシック CLI** です。すべての実装はリポジトリ
-ルートの `validator.py`（約 946 行）に収まっており、外部依存は `pydantic` のみ、
-ネットワーク通信は一切行いません（依存関係監査でオプションの `pip-audit` / `npm audit`
-を呼ぶ場合を除く）。完全オフラインで動作することが設計上の中心要件です。
+ルートの `validator.py`（約 1,700 行）に収まっており、外部依存は `pydantic` のみです。
+コード検査はネットワーク通信を行わず、ソースコードを外に出さないことが設計上の中心要件です。
+依存関係の監査（既定で有効）だけは `pip-audit` / `npm audit` を呼び、公開の脆弱性
+データベースにパッケージ名と版を問い合わせます（`dependency_rules` で切れる）。
 
 > 出典: `validator.py`、`spec.md`、`CLAUDE.md`。
 
@@ -13,7 +14,7 @@ code-validator は **単一ファイルのモノリシック CLI** です。す�
 
 | 目標 | 実現方法 |
 |---|---|
-| 完全オフライン | ソースコードを外部に送らない。CVE 照会のみ `pip-audit` / `npm audit` に委譲 |
+| ソースを外に出さない | コード検査はオフライン。CVE 照会のみ `pip-audit` / `npm audit` に委譲（既定で有効・`dependency_rules` で無効化） |
 | 最小依存 | コア依存は `pydantic==2.13.4` のみ（`requirements.txt`） |
 | CI フレンドリ | Critical / High 検出時に終了コード `1` を返しジョブをブロック |
 | 高速 | `--git-diff` で変更ファイルのみスキャン |

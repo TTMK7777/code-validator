@@ -43,9 +43,7 @@ code-validator は、ソースコードを読んで「危険な書き方」（�
 |---|---|
 | pydantic の版: CLAUDE.md・README.md・spec.md などは 2.13.4、`requirements.txt` は 2.14.1 | `requirements.txt` が現行（実際に入る版。更新は Dependabot が出す） |
 | 計画 [plan.md](plan.md) の Phase 2 に「テストスイート整備」が未着手と書いてある | テストは既にある。[STATUS.md](STATUS.md) が現行 |
-| [docs/dev/architecture.md](docs/dev/architecture.md) の「約 946 行」 | 古い数字。`validator.py` はもっと長い |
 | README は pydantic を唯一の必須依存と説明するが、`validator.py` は pydantic を読み込んでいない（`git grep -n pydantic validator.py` が 0 件） | 動作に pydantic は使われていない。依存の整理は判断が必要なので、このガイドでは触らない |
-| README.md・spec.md は「完全オフライン／外部通信なし」と説明するが、`requirements.txt` か `package.json` がある場所を `--path` で検査すると、`pip-audit` / `npm audit` が入っていれば外部の脆弱性データベースへ問い合わせる（`validator.py` の `DependencyChecker.check_dependencies`。`--git-diff` の有無に関係なく動く） | 通信するのは依存検査だけ。ソースコードは送られない。通信を避けるなら、両ファイルの無いフォルダを指す |
 | CLAUDE.md が仕組みとして挙げる todo.md・knowledge.md・memory.md はリポジトリに無い（.gitignore 対象のローカル限定ファイル。STATUS.md にも todo.md はローカル限定とある） | 共有される現在地は [STATUS.md](STATUS.md)。無いファイルを探さなくてよい |
 
 ## よくある作業（逆引き）
