@@ -168,6 +168,8 @@ def test_sec006_still_fires_on_value_interpolation(scan, code: str) -> None:
         'cur = conn.execute(f"SELECT * FROM {table} LIMIT 0")',
         'conn.execute(f"SELECT pg_advisory_xact_lock({self._LOCK_KEY})")',
         'rows = conn.execute(f"SELECT {cols} FROM rankings WHERE category = ? AND period_type = ?"',
+        # IN の中が副問い合わせ（値のリストではない）。Codex 指摘の修正後の再計測で出た行
+        'conn.execute(f"DELETE FROM invites WHERE session_id IN (SELECT id FROM sessions WHERE {where})", params)',
         # SQL ではない、単語としての update / select
         "print(f\"    {'update' if cur is not None else 'new':6} {name}\")",
         '_git(cdir, "update-index", "--add", "--cacheinfo", f"160000,{sha},hooks/sub")',
@@ -198,10 +200,7 @@ def test_dangerous_calls_ignore_strings_and_comments(scan, code: str, rule_id: s
     ("code", "rule_id"),
     [
         ("exec(open('lib.py').read())", "SEC013"),
-        pytest.param(
-            'msg = f"result: {eval(expr)}"', "SEC013",
-            marks=pytest.mark.skipif(sys.version_info < (3, 12), reason="3.11 以前は f 文字列全体が 1 つの文字列トークン"),
-        ),
+        ('msg = f"result: {eval(expr)}"', "SEC013"),
         ('x = "a"; obj = pickle.loads(blob)', "SEC012"),
     ],
 )
@@ -234,3 +233,93 @@ def test_sec003_no_false_positive_on_placeholders(scan, code: str) -> None:
 
 def test_sec003_still_fires_on_real_looking_password(scan) -> None:
     assert_fires(scan('DSN = "postgresql://admin:Tr0ub4dor3@db.internal:5432/app"'), "SEC003")
+
+
+# --- PR #97 への Codex の指摘 -----------------------------------------------
+#
+# なぜ前段で止まらなかったか: テストは CI の Python 3.12 でしか回しておらず
+# （3.11 以前は f 文字列全体が 1 つの文字列トークン）、差分走査・サブモジュール・
+# 1 行に複数ある接続文字列・BETWEEN / リストの 2 要素目という経路を
+# 「発火する例」に入れていなかった。
+
+def _git(cwd: Path, *args: str) -> None:
+    proc = subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+         "-c", "protocol.file.allow=always", "-c", "init.defaultBranch=main", *args],
+        cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    assert proc.returncode == 0, f"git {' '.join(args)}: {proc.stderr[-400:]}"
+
+
+@pytest.mark.parametrize(
+    ("code", "rule_id"),
+    [
+        ('msg = f"result: {eval(expr)}"', "SEC013"),
+        ('msg = f"result: {pickle.loads(blob)}"', "SEC012"),
+        ("msg = f'{os.system(\"ls \" + path)}'", "SEC011"),
+    ],
+)
+def test_calls_inside_fstring_expressions_fire_on_every_python(scan, code: str, rule_id: str) -> None:
+    """f 文字列の式部分にある呼び出しは、Python の版に関係なく拾うこと."""
+    assert_fires(scan(code), rule_id)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git が無い環境")
+def test_size_limit_also_applies_to_git_diff(tmp_path: Path, caplog) -> None:
+    project = tmp_path / "repo"
+    project.mkdir()
+    _git(project, "init", "-q")
+    (project / "a.py").write_text("x = 1\n", encoding="utf-8")
+    _git(project, "add", ".")
+    _git(project, "commit", "-q", "-m", "1")
+    # 鍵ではなく eval を使う（利用者の pre-commit の秘密検出にコミットを止められないよう）
+    (project / "dump.json").write_text('{"pad": "' + "x" * 300_000 + '"}', encoding="utf-8")
+    (project / "b.py").write_text("v = eval(expr)\n", encoding="utf-8")
+    _git(project, "add", ".")
+    _git(project, "commit", "-q", "-m", "2")
+
+    config_path = tmp_path / "cfg.json"
+    config_path.write_text(json.dumps({**NO_DEPS, "max_file_size_kb": 100}), encoding="utf-8")
+    with caplog.at_level(logging.WARNING):
+        issues = CodeValidator(config_path).validate(project, git_diff=True).issues
+    names = {Path(i.file_path).name for i in issues}
+    assert "b.py" in names, names
+    assert "dump.json" not in names, names
+    assert any("dump.json" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git が無い環境")
+def test_initialized_submodule_sources_are_scanned(tmp_path: Path) -> None:
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    _git(sub, "init", "-q")
+    (sub / "app.py").write_text("v = eval(expr)\n", encoding="utf-8")
+    _git(sub, "add", ".")
+    _git(sub, "commit", "-q", "-m", "sub")
+
+    project = tmp_path / "repo"
+    project.mkdir()
+    _git(project, "init", "-q")
+    _git(project, "submodule", "add", "-q", str(sub), "vendor/sub")
+    _git(project, "commit", "-q", "-m", "add sub")
+
+    issues = _validate(project, tmp_path, {**NO_DEPS, "file_extensions": [".py"]})
+    assert "app.py" in {Path(i.file_path).name for i in issues}
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        'cur.execute(f"SELECT * FROM t WHERE id BETWEEN {low} AND {high}")',
+        'cur.execute(f"INSERT INTO t (a, b) VALUES (1, {user_input})")',
+        'cur.execute(f"DELETE FROM t WHERE id IN (1, {extra})")',
+    ],
+)
+def test_sec006_fires_on_between_and_later_list_items(scan, code: str) -> None:
+    assert_fires(scan(code), "SEC006")
+
+
+def test_sec003_checks_every_url_on_the_line(scan) -> None:
+    code = ('CFG = {"example": "postgresql://user:pass@localhost/db", '
+            '"production": "postgresql://admin:Tr0ub4dor3@db.internal/app"}')
+    assert_fires(scan(code), "SEC003")

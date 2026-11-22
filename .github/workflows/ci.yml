@@ -47,3 +47,27 @@ jobs:
 
       - name: Run tests
         run: python -m pytest tests/ -q
+
+  # 3.11 以前は f 文字列の字句解析が 3.12 以降と違う（全体が 1 つの文字列トークン）。
+  # 3.12 だけで回していたため、PR #97 で f 文字列の式内の eval を見逃す退行が
+  # すり抜けた。validate.yml は 3.11 で動くので、同じ版でもテストする。
+  # job 名は required check の "test" と別にしてある（必須にするかは別途判断）。
+  test-py311:
+    name: test (python 3.11)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run tests
+        run: python -m pytest tests/ -q

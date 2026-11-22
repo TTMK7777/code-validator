@@ -24,6 +24,16 @@
 - **SEC011〜013**: Python では字句解析で文字列・コメントの中の一致を外す
   （`"Never use eval()"` のような説明文・docstring）。JSON ファイルは対象外にした（実行されない）。
 - **SEC003**: `user:pass@` / `<password>` / `${PASSWORD}` のような書式例を報告しないようにした。
+- 上記への Codex レビューの指摘（PR #98）:
+  - Python 3.11 以前で f 文字列の式内（`f"{eval(x)}"`）を見逃していた → f 文字列は除外しない
+  - サイズ上限が `--git-diff` に効いていなかった → 両方の経路の合流後に適用
+  - 初期化済みサブモジュールの中を走査していなかった → `--recurse-submodules`
+  - SEC006 が `BETWEEN {a} AND {b}` と `VALUES (1, {x})` の 2 要素目を見逃していた
+    （`IN (SELECT ...)` の副問い合わせは除く）
+  - SEC003 が 1 行に複数ある接続文字列の 2 つ目以降を見ていなかった
+- CodeQL が 11-15 から赤のままだった（init と analyze の版ずれ）。版をそろえ、
+  Dependabot で `codeql-action` を 1 つの PR にまとめるようにした。
+- CI に Python 3.11 のテストを追加（validate.yml は 3.11 で動くのに、テストは 3.12 だけだった）。
 
 ### Changed
 - README / spec / llms.txt の「100% オフライン」を訂正。コード検査はオフラインだが、
