@@ -658,8 +658,8 @@ class SecurityScanner:
             # 注入経路ではないため、実コーパスでは誤検知しか生まなかった。
             if self.DYNAMIC_STRING_MARKER.search(line):
                 for pattern in self.COMMAND_EXEC_DYNAMIC_PATTERNS:
-                    found = re.search(pattern, line)
-                    if found and in_code(line_num, found.start()):
+                    # 最初の一致が説明文（文字列の中）でも、後ろの実際の呼び出しを見る
+                    if any(in_code(line_num, m.start()) for m in re.finditer(pattern, line)):
                         issues.append(Issue(
                             severity=Severity.HIGH,
                             category="security",
@@ -759,7 +759,15 @@ class SecurityScanner:
                 q = text[i:i + 3] if text[i:i + 3] in ('"""', "'''") else ch
                 close = text.find(q, i + len(q), body_end)
                 end = body_end if close == -1 else close + len(q)
-                spans.append((pos(i), pos(end)))
+                # 式の中の文字列が f 文字列なら、その中の式は実行されるので
+                # 丸ごと外さず、同じ切り分けを再帰的にかける
+                prefix_from = i
+                while prefix_from > body_start and text[prefix_from - 1].isalpha():
+                    prefix_from -= 1
+                if 'f' in text[prefix_from:i].lower():
+                    spans.extend(SecurityScanner._fstring_literal_spans(text[prefix_from:end], pos(prefix_from)))
+                else:
+                    spans.append((pos(i), pos(end)))
                 i = end
                 continue
             if ch == '{':
