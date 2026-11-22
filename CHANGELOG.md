@@ -7,6 +7,29 @@
 
 ## [Unreleased]
 
+### Fixed（手元 54 リポへの自己適用で見つかった不具合）
+- **出力先が cp932 のとき、指摘 0 件でも終了コード 1 で落ちていた**。要約の絵文字で
+  `UnicodeEncodeError` になり、例外の 1 が「指摘あり」の 1 と区別できなかった
+  （日本語 Windows でパイプ・ファイルに出す CI では常に赤）。表せない文字は `?` に置き換える。
+- **.gitignore を見ていなかった**。git 管理下では `git ls-files --cached --others
+  --exclude-standard` の結果だけを走査する（未 add の新規ファイルは見る）。
+  `respect_gitignore: false` で従来どおり。git 外ではディレクトリ走査に戻る。
+- **`.venv` が既定の除外に無かった**。
+- **巨大ファイルで終わらなかった**。`max_file_size_kb`（既定 2048）を超えるファイルは
+  読まずに警告を出す（黙って見落とさない）。
+- **SEC006**: 固定の部品（`FROM {table}` / `WHERE {where}` / `VALUES ({placeholders})`）だけを
+  差し込む f 文字列を報告しないようにした。値の位置（`= {x}` / `'{x}'` / `LIKE '%{x}%'` /
+  `IN ({x})` / `LIMIT {x}`）は従来どおり報告する。あわせて `'update'` / `"update-index"` の
+  ような単語を SQL 文の始まりと誤認しないようにした。
+- **SEC011〜013**: Python では字句解析で文字列・コメントの中の一致を外す
+  （`"Never use eval()"` のような説明文・docstring）。JSON ファイルは対象外にした（実行されない）。
+- **SEC003**: `user:pass@` / `<password>` / `${PASSWORD}` のような書式例を報告しないようにした。
+
+### Changed
+- README / spec / llms.txt の「100% オフライン」を訂正。コード検査はオフラインだが、
+  依存関係の監査（既定で有効）は `pip-audit` / `npm audit` 経由でパッケージ名と版を
+  公開の脆弱性データベースに問い合わせる。
+
 ### Removed
 - **SEC007（FastAPI のセキュリティヘッダー欠落）を削除**。行単位・ファイル単位の
   スキャナでは原理的に判定できないため。セキュリティヘッダーは専用のミドルウェア

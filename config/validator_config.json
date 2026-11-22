@@ -2,6 +2,7 @@
   "exclude_patterns": [
     "**/node_modules/**",
     "**/venv/**",
+    "**/.venv/**",
     "**/__pycache__/**",
     "**/.git/**",
     "**/dist/**",
@@ -18,6 +19,8 @@
     ".yaml",
     ".yml"
   ],
+  "respect_gitignore": true,
+  "max_file_size_kb": 2048,
   "security_rules": {
     "check_credentials": true,
     "check_cors": true,

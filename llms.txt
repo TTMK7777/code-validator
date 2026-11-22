@@ -1,6 +1,6 @@
 # code-validator
 
-> Static security scanner purpose-built for AI-generated code. Detects hardcoded credentials, CORS misconfigurations, SQL injection patterns, and dependency CVEs in under 1 second per file, fully offline, with zero external API calls beyond the optional PyPA advisory database.
+> Static security scanner purpose-built for AI-generated code. Detects hardcoded credentials, CORS misconfigurations, SQL injection patterns, and dependency CVEs in under 1 second per file. The code scan runs offline; only the dependency audit (pip-audit / npm audit, on by default, can be disabled) queries public advisory databases with package names and versions.
 
 ## What it is
 
@@ -32,7 +32,7 @@ code-validator is a Python 3.9+ command-line tool that acts as a CI/CD quality g
 ## Differentiators
 
 1. Purpose-built for AI-generated code patterns
-2. Fully offline (no SaaS, no code exfiltration)
+2. Offline code scan (no SaaS, no code exfiltration; only the optional dependency audit goes online)
 3. Single-dependency install (only pydantic)
 4. Sub-second per-file scan time
 5. Unified report across security, quality, and dependency layers
