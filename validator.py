@@ -705,18 +705,72 @@ class SecurityScanner:
             for tok in tokenize.generate_tokens(io.StringIO(content).readline):
                 if tok.type not in kinds:
                     continue
-                # Python 3.11 以前は f 文字列全体が 1 つの STRING トークンになり、
-                # 式部分（`f"{eval(x)}"`）まで外れてしまう。f 文字列は外さない
-                # （3.12 以降は FSTRING_MIDDLE として文字部分だけが来る）。
+                # Python 3.11 以前は f 文字列全体が 1 つの STRING トークンになる。
+                # 丸ごと外すと式部分（`f"{eval(x)}"`）を見逃し、丸ごと残すと説明文
+                # （`f"Never use eval() for {name}"`）に反応する。文字の部分と
+                # 式の中の文字列だけを外す（3.12 以降は FSTRING_MIDDLE で同じ形になる）。
                 if tok.type == tokenize.STRING:
                     prefix = re.match(r'[A-Za-z]*', tok.string).group(0)
                     if 'f' in prefix.lower():
+                        spans.extend(SecurityScanner._fstring_literal_spans(tok.string, tok.start))
                         continue
                 spans.append((tok.start, tok.end))
         except Exception:  # noqa: BLE001
             # 字句解析の失敗を scan_file まで上げると、そのファイルの指摘が
             # 全ルール分まとめて消える（偽グリーン）。ここで握って検出側に倒す。
             pass
+        return spans
+
+    @staticmethod
+    def _fstring_literal_spans(text: str, start: Tuple[int, int]) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
+        """f 文字列トークン 1 つから「コードでない範囲」を返す。
+
+        対象は文字の部分（`{` `}` の外）と、式の中の文字列リテラル。
+        式そのもの・書式指定は残す（検出側に倒す）。`{{` `}}` は文字扱い。
+        """
+        head = re.match(r'[A-Za-z]*("""|\'\'\'|"|\')', text)
+        if not head:
+            return []
+        quote = head.group(1)
+        body_start, body_end = head.end(), len(text) - len(quote)
+
+        def pos(k: int) -> Tuple[int, int]:
+            before = text[:k]
+            newlines = before.count('\n')
+            if newlines == 0:
+                return (start[0], start[1] + k)
+            return (start[0] + newlines, k - before.rfind('\n') - 1)
+
+        spans = []
+        i, literal_from, depth = body_start, body_start, 0
+        while i < body_end:
+            ch = text[i]
+            if depth == 0:
+                if text.startswith('{{', i) or text.startswith('}}', i):
+                    i += 2
+                    continue
+                if ch == '{':
+                    if i > literal_from:
+                        spans.append((pos(literal_from), pos(i)))
+                    depth = 1
+                i += 1
+                continue
+            if ch in '\'"':
+                q = text[i:i + 3] if text[i:i + 3] in ('"""', "'''") else ch
+                close = text.find(q, i + len(q), body_end)
+                end = body_end if close == -1 else close + len(q)
+                spans.append((pos(i), pos(end)))
+                i = end
+                continue
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    literal_from = i + 1
+            i += 1
+        if depth == 0 and body_end > literal_from:
+            spans.append((pos(literal_from), pos(body_end)))
         return spans
 
     @staticmethod
